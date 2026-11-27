@@ -9,7 +9,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="google" content="notranslate">
-<link rel="stylesheet" href="estilos.css?v=6">
+<link rel="stylesheet" href="estilos.css?v=7">
 </head>
 <body>
 <main class="wrap">
@@ -68,6 +68,7 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, setPe
 import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { firebaseConfig, DOMINIO_EMPRESAS, MAX_MB, NOMBRE_DESPACHO, ALMACENAMIENTO } from "./config.js";
+import { iniciarActividad, cerrarActividad } from "./actividad.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app), db = getFirestore(app);
@@ -114,7 +115,7 @@ $("fPin").addEventListener("submit", async e => {
       : "PIN incorrecto. Verifica con tu contador.", "err");
   } finally { $("bPin").disabled = false; }
 });
-$("bSalir").onclick = () => signOut(auth);
+$("bSalir").onclick = async () => { await cerrarActividad(); signOut(auth); };
 
 // ---------- Portal ----------
 async function entrar() {
@@ -125,6 +126,7 @@ async function entrar() {
     $("empNombre").textContent = s.data().nombre;
     $("drop").classList.remove("off");
   } catch { return desactivada(); }
+  iniciarActividad(db, auth.currentUser, "empresa", empId);
 
   unsub?.();
   unsub = onSnapshot(

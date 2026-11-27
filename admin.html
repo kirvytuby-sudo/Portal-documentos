@@ -9,7 +9,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="google" content="notranslate">
-<link rel="stylesheet" href="estilos.css?v=6">
+<link rel="stylesheet" href="estilos.css?v=7">
 </head>
 <body>
 <main class="wrap wide">
@@ -43,6 +43,7 @@
       <button class="tab on" data-tab="tBandeja">Bandeja</button>
       <button class="tab" data-tab="tEmpresas">Empresas</button>
       <button class="tab hidden" data-tab="tUsuarios" id="tabUsuarios">Usuarios</button>
+      <button class="tab hidden" data-tab="tActividad" id="tabActividad">Actividad</button>
     </nav>
 
     <!-- Bandeja -->
@@ -88,6 +89,21 @@
       <div id="listaEmp" class="lista"></div>
     </div>
 
+    <!-- Actividad (solo el dueño) -->
+    <div id="tActividad" class="hidden">
+      <div class="card">
+        <div class="row between"><h3 style="margin:0">🟢 En línea ahora</h3><span class="muted small">Se actualiza solo</span></div>
+        <div id="enLinea" class="lista" style="margin-top:12px"></div>
+      </div>
+      <div class="card">
+        <div class="row between" style="margin-bottom:12px">
+          <h3 style="margin:0">Últimos accesos</h3>
+          <select id="fAcc" style="width:auto"><option value="">Todos</option><option value="panel">Usuarios del panel</option><option value="empresa">Empresas</option></select>
+        </div>
+        <div id="listaAcc" class="lista"></div>
+      </div>
+    </div>
+
     <!-- Usuarios (solo el dueño) -->
     <div id="tUsuarios" class="hidden">
       <div class="card">
@@ -113,6 +129,7 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, creat
 import { getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { firebaseConfig, ADMIN_EMAILS, DOMINIO_EMPRESAS, NOMBRE_DESPACHO } from "./config.js";
+import { iniciarActividad, cerrarActividad } from "./actividad.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app), db = getFirestore(app);
@@ -173,12 +190,18 @@ $("fLogin").onsubmit = async e => {
   try { await signInWithEmailAndPassword(auth, correoUsuario($("lCorreo").value.trim()), $("lPass").value); msg("loginMsg", ""); }
   catch { msg("loginMsg", "Usuario o contraseña incorrectos.", "err"); }
 };
-$("bSalir").onclick = () => signOut(auth);
+$("bSalir").onclick = async () => { await cerrarActividad(); signOut(auth); };
 
 function iniciar(u) {
   $("vLogin").classList.add("hidden"); $("vPanel").classList.remove("hidden"); $("sesion").classList.remove("hidden");
   $("yo").textContent = nombreUsuario(u.email);
   $("tabUsuarios").classList.toggle("hidden", !esDueno);
+  $("tabActividad").classList.toggle("hidden", !esDueno);
+  iniciarActividad(db, u, "panel");
+  if (esDueno) {
+    unsubs.push(onSnapshot(collection(db, "sesiones"), s => { sesiones = s.docs.map(d => d.data()); renderActividad(); }, errorGeneral));
+    unsubs.push(onSnapshot(query(collection(db, "accesos"), orderBy("fecha", "desc"), limit(200)), s => { accesos = s.docs.map(d => d.data()); renderActividad(); }, errorGeneral));
+  }
   if (esDueno) unsubs.push(onSnapshot(query(collection(db, "admins"), orderBy("nombre")), s => {
     usuarios = s.docs.map(d => ({ id: d.id, ...d.data() })); renderUsuarios();
   }, errorGeneral));
@@ -213,7 +236,7 @@ function todoRender() { renderArchivos(); renderEmpresas(); stats(); }
 // ---------- Pestañas ----------
 document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
-  ["tBandeja","tEmpresas","tUsuarios"].forEach(t => $(t).classList.toggle("hidden", t !== b.dataset.tab));
+  ["tBandeja","tEmpresas","tUsuarios","tActividad"].forEach(t => $(t).classList.toggle("hidden", t !== b.dataset.tab));
 });
 const irBandeja = empId => { $("fEmpresa").value = empId; $("fEstado").value = ""; cambiarEmpresa(); document.querySelector('[data-tab="tBandeja"]').click(); };
 
@@ -296,6 +319,44 @@ $("listaUsu").onclick = async ev => {
     await deleteDoc(doc(db, "admins", u.id)); toast("Acceso quitado");
   }
 };
+
+// ---------- Actividad (solo el dueño) ----------
+let sesiones = [], accesos = [];
+function quienEs(correo, tipo, empresaId) {
+  if (tipo === "empresa") { const e = empresas.get(empresaId); return { nombre: e?.nombre || "Empresa", det: "Cliente · portal de carga" }; }
+  if (duenos.includes(correo)) return { nombre: correo, det: "Dueño" };
+  const u = usuarios.find(x => x.id === correo);
+  return { nombre: u?.nombre || nombreUsuario(correo), det: "Usuario: " + nombreUsuario(correo) };
+}
+const haceCuanto = d => {
+  if (!d) return "—";
+  const m = Math.round((Date.now() - d.getTime()) / 60000);
+  return m < 1 ? "ahora" : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : fmt(d);
+};
+function renderActividad() {
+  if (!esDueno) return;
+  const lim = Date.now() - 3 * 60000;
+  const online = sesiones.filter(x => x.activo && (x.ultimaVez?.toDate?.()?.getTime() || 0) > lim)
+    .sort((a, b) => (a.tipo > b.tipo) - (a.tipo < b.tipo));
+  $("enLinea").innerHTML = online.length ? online.map(x => {
+    const q = quienEs(x.quien, x.tipo, x.empresaId);
+    return `<div class="item"><span class="punto"></span>
+      <div class="info"><div class="nm">${esc(q.nombre)}</div><div class="muted small">${esc(q.det)} · ${esc(x.dispositivo || "")}</div></div>
+      <span class="tag ${x.tipo === "empresa" ? "warn" : "ok"}">${x.tipo === "empresa" ? "Empresa" : "Panel"}</span></div>`;
+  }).join("") : '<p class="muted small">No hay nadie conectado en este momento.</p>';
+
+  const f = $("fAcc").value;
+  const lista = accesos.filter(a => !f || a.tipo === f);
+  $("listaAcc").innerHTML = lista.length ? lista.map(a => {
+    const q = quienEs(a.quien, a.tipo, a.empresaId), d = a.fecha?.toDate?.();
+    return `<div class="item">
+      <div class="info"><div class="nm">${esc(q.nombre)}</div><div class="muted small">${esc(q.det)} · ${esc(a.dispositivo || "")}</div></div>
+      <div style="text-align:right"><div class="small"><b>${haceCuanto(d)}</b></div><div class="muted small">${fmt(d)}</div></div>
+    </div>`;
+  }).join("") : '<p class="muted small">Sin accesos registrados todavía.</p>';
+}
+$("fAcc").onchange = renderActividad;
+setInterval(renderActividad, 30000);
 
 // ---------- Estadísticas ----------
 function stats() {

@@ -56,6 +56,19 @@ service cloud.firestore {
       allow write: if isOwner();
     }
 
+    // Quién está en línea: cada quien actualiza el suyo; solo el dueño los ve
+    match /sesiones/{correo} {
+      allow read: if isOwner();
+      allow write: if request.auth != null && request.auth.token.email == correo;
+    }
+    // Registro de accesos: cada quien registra el suyo; solo el dueño los ve
+    match /accesos/{id} {
+      allow read, delete: if isOwner();
+      allow create: if request.auth != null
+        && request.resource.data.quien == request.auth.token.email
+        && request.resource.data.fecha == request.time;
+    }
+
     // Contraseñas de usuarios del panel: solo el dueño
     match /privadoUsu/{correo} {
       allow read, write: if isOwner();
