@@ -46,13 +46,25 @@
     <!-- Bandeja -->
     <div id="tBandeja">
       <div id="indiceMsg" class="aviso hidden"></div>
-      <div class="filtros">
-        <select id="fEmpresa"><option value="">Todas las empresas</option></select>
-        <select id="fEstado"><option value="pend">Pendientes</option><option value="">Todos</option><option value="rev">Revisados</option></select>
-        <input id="fTexto" placeholder="Buscar por nombre de archivo o nota">
-        <button class="btn" id="bRevTodo">✓ Marcar visibles como revisados</button>
+      <!-- Vista 1: todas las empresas -->
+      <div id="vEmpresasB">
+        <input id="bBuscarEmp" placeholder="Buscar empresa por nombre o RFC" style="margin-bottom:12px">
+        <div id="gridEmp" class="grid-emp"><p class="muted small">Cargando…</p></div>
       </div>
-      <div id="listaArch" class="lista"><p class="muted small">Cargando…</p></div>
+      <!-- Vista 2: documentos de una empresa -->
+      <div id="vDetalle" class="hidden">
+        <div class="detalle-head">
+          <button class="btn" id="bVolver">← Todas las empresas</button>
+          <div class="info"><h2 id="detNombre"></h2><p class="muted small" id="detInfo"></p></div>
+        </div>
+        <div class="filtros det">
+          <input type="hidden" id="fEmpresa" value="">
+          <select id="fEstado"><option value="">Todos</option><option value="pend">Pendientes</option><option value="rev">Revisados</option></select>
+          <input id="fTexto" placeholder="Buscar por nombre de archivo o nota">
+          <button class="btn" id="bRevTodo">✓ Marcar todos como revisados</button>
+        </div>
+        <div id="listaArch" class="lista"></div>
+      </div>
     </div>
 
     <!-- Empresas -->
@@ -173,11 +185,9 @@ function stats() {
 
 // ---------- Bandeja ----------
 function llenarSelect() {
-  const v = $("fEmpresa").value;
-  $("fEmpresa").innerHTML = '<option value="">Todas las empresas</option>' +
-    [...empresas.values()].map(e => `<option value="${e.id}">${esc(e.nombre)}</option>`).join("");
-  $("fEmpresa").value = empresas.has(v) ? v : "";
+  if ($("fEmpresa").value && !empresas.has($("fEmpresa").value)) verEmpresa("");
 }
+function verEmpresa(id) { $("fEmpresa").value = id; $("fTexto").value = ""; cambiarEmpresa(); window.scrollTo(0, 0); }
 function cambiarEmpresa() {
   unsubEmp?.(); unsubEmp = null; filtrados = null;
   const id = $("fEmpresa").value;
@@ -185,47 +195,55 @@ function cambiarEmpresa() {
     unsubEmp = onSnapshot(query(collection(db, "empresas", id, "archivos"), orderBy("fecha", "desc"), limit(1000)), s => {
       filtrados = s.docs.map(d => ({ path: d.ref.path, ...d.data() })); renderArchivos();
     }, errorGeneral);
+  $("vEmpresasB").classList.toggle("hidden", !!id);
+  $("vDetalle").classList.toggle("hidden", !id);
   renderArchivos();
 }
-$("fEmpresa").onchange = cambiarEmpresa;
+$("bVolver").onclick = () => verEmpresa("");
+$("bBuscarEmp").oninput = renderArchivos;
 $("fEstado").onchange = renderArchivos;
 $("fTexto").oninput = renderArchivos;
+$("gridEmp").onclick = e => { const c = e.target.closest("[data-ver]"); if (c) verEmpresa(c.dataset.ver); };
 
-function renderArchivos() {
-  const est = $("fEstado").value, txt = $("fTexto").value.trim().toLowerCase(), emp = $("fEmpresa").value;
-  let base = emp ? (filtrados ?? todos.filter(a => a.empresaId === emp)) : todos;
+function renderArchivos() { return $("fEmpresa").value ? renderDetalle($("fEmpresa").value) : renderGrid(); }
+
+// Vista 1: tarjeta por empresa
+function renderGrid() {
+  const txt = $("bBuscarEmp").value.trim().toLowerCase();
+  const st = {};
+  todos.forEach(a => { const s = st[a.empresaId] ??= { tot: 0, pend: 0, ult: null }; s.tot++; if (!a.revisado) s.pend++; if (!s.ult) s.ult = a.fecha?.toDate?.(); });
+  const lista = [...empresas.values()]
+    .filter(e => !txt || (e.nombre + " " + (e.rfc || "")).toLowerCase().includes(txt))
+    .sort((x, y) => ((st[y.id]?.pend || 0) > 0) - ((st[x.id]?.pend || 0) > 0) || x.nombre.localeCompare(y.nombre, "es"));
+  if (!lista.length) { $("gridEmp").innerHTML = `<div class="card muted" style="text-align:center;grid-column:1/-1">${empresas.size ? "Ninguna empresa coincide." : "Aún no tienes empresas. Agrégalas en la pestaña Empresas."}</div>`; return; }
+  $("gridEmp").innerHTML = lista.map(e => {
+    const s = st[e.id] || { tot: 0, pend: 0, ult: null };
+    return `<button class="emp-card ${s.pend ? "con-pend" : ""}" data-ver="${esc(e.id)}">
+      <div class="row between" style="flex-wrap:nowrap;align-items:flex-start">
+        <div class="info" style="min-width:0"><div class="nm">${esc(e.nombre)}</div><div class="muted small">${esc(e.rfc || "Sin RFC")}</div></div>
+        ${s.pend ? `<span class="tag warn">${s.pend} pendiente${s.pend > 1 ? "s" : ""}</span>` : s.tot ? '<span class="tag ok">Al día</span>' : ""}
+      </div>
+      <div class="muted small">${s.tot ? `${s.tot} documento${s.tot > 1 ? "s" : ""} · último: ${fmt(s.ult)}` : "Sin envíos todavía"}${e.activo ? "" : ' · <span class="tag off">Inactiva</span>'}</div>
+    </button>`;
+  }).join("");
+}
+
+// Vista 2: documentos de la empresa elegida
+function renderDetalle(emp) {
+  const e = empresas.get(emp);
+  const est = $("fEstado").value, txt = $("fTexto").value.trim().toLowerCase();
+  const base = filtrados ?? todos.filter(a => a.empresaId === emp);
+  const pend = base.filter(a => !a.revisado).length;
+  $("detNombre").textContent = e?.nombre || "";
+  $("detInfo").textContent = `${base.length} documento${base.length === 1 ? "" : "s"} · ${pend ? pend + " pendiente" + (pend > 1 ? "s" : "") : "todo revisado"}`;
   vistos = base.filter(a =>
     (!est || (est === "pend" ? !a.revisado : a.revisado)) &&
     (!txt || (a.nombre + " " + (a.nota || "")).toLowerCase().includes(txt)));
   porRuta = new Map(vistos.map(a => [a.path, a]));
   $("bRevTodo").disabled = !vistos.some(a => !a.revisado);
-  if (!vistos.length) { $("listaArch").innerHTML = `<div class="card muted" style="text-align:center">${est === "pend" ? "🎉 No hay documentos pendientes." : "Sin documentos."}</div>`; return; }
-  // Agrupar por empresa: primero las que tienen pendientes, luego por envío más reciente
-  const grupos = new Map();
-  vistos.forEach(a => { if (!grupos.has(a.empresaId)) grupos.set(a.empresaId, []); grupos.get(a.empresaId).push(a); });
-  const orden = [...grupos.entries()].sort(([, x], [, y]) => {
-    const px = x.some(a => !a.revisado), py = y.some(a => !a.revisado);
-    if (px !== py) return py - px;
-    return (y[0].fecha?.toMillis?.() || 0) - (x[0].fecha?.toMillis?.() || 0);
-  });
-  const unaSola = orden.length === 1;
-  $("listaArch").innerHTML = orden.map(([id, arch]) => {
-    const e = empresas.get(id), pend = arch.filter(a => !a.revisado).length;
-    const abierta = unaSola || abiertas.has(id) || (!cerradas.has(id) && pend > 0);
-    const ult = arch[0].fecha?.toDate?.();
-    return `<div class="grupo">
-      <div class="grupo-head" data-grupo="${esc(id)}">
-        <span class="flecha">${abierta ? "▾" : "▸"}</span>
-        <div class="info"><div class="nm">${esc(e?.nombre || id)}</div>
-          <div class="muted small">${arch.length} documento${arch.length > 1 ? "s" : ""} · último: ${fmt(ult)}</div></div>
-        ${pend ? `<span class="tag warn">${pend} pendiente${pend > 1 ? "s" : ""}</span>` : '<span class="tag ok">Al día</span>'}
-        ${pend ? `<button class="btn sm" data-act="revgrupo" data-emp="${esc(id)}">✓ Revisar todos</button>` : ""}
-      </div>
-      ${abierta ? `<div class="grupo-body">${arch.map(filaArchivo).join("")}</div>` : ""}
-    </div>`;
-  }).join("");
+  $("listaArch").innerHTML = vistos.length ? vistos.map(filaArchivo).join("")
+    : `<div class="card muted" style="text-align:center">${est === "pend" ? "🎉 No hay documentos pendientes." : "Sin documentos."}</div>`;
 }
-const abiertas = new Set(), cerradas = new Set();
 function filaArchivo(a) {
   {
     const img = a.url && (a.tipo || "").startsWith("image/") && !/hei[cf]/.test(a.tipo);
@@ -255,12 +273,6 @@ $("listaArch").onclick = async e => {
     if (!p.length || !confirm(`¿Marcar ${p.length} documento(s) de ${n} como revisados?`)) return;
     const wb = writeBatch(db); p.forEach(a => wb.update(doc(db, a.path), { revisado: true }));
     await wb.commit(); toast(`${p.length} marcados como revisados`); return;
-  }
-  const h = !b && e.target.closest("[data-grupo]");
-  if (h) {
-    const id = h.dataset.grupo, abierta = !!h.parentElement.querySelector(".grupo-body");
-    if (abierta) { abiertas.delete(id); cerradas.add(id); } else { cerradas.delete(id); abiertas.add(id); }
-    return renderArchivos();
   }
   if (!b) return;
   const a = porRuta.get(b.dataset.p); if (!a) return;

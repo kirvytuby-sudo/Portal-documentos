@@ -84,3 +84,12 @@ a{color:var(--pri)}
 .grupo-body{display:flex;flex-direction:column;gap:8px;padding:0 12px 12px;border-top:1px solid var(--line);padding-top:12px;background:var(--bg)}
 .lista{gap:12px}
 @media (max-width:760px){.grupo-head{flex-wrap:wrap}}
+/* Bandeja: tarjetas de empresas */
+.grid-emp{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.emp-card{font:inherit;color:inherit;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--sh);transition:.15s}
+.emp-card:hover{border-color:var(--pri);transform:translateY(-1px)}
+.emp-card.con-pend{border-left:4px solid var(--warn)}
+.emp-card .nm{font-size:16px}
+.detalle-head{display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.filtros.det{grid-template-columns:1fr 2fr auto}
+@media (max-width:760px){.filtros.det{grid-template-columns:1fr}}
