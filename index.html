@@ -15,7 +15,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Mis Documentos">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="stylesheet" href="estilos.css?v=11">
+<link rel="stylesheet" href="estilos.css?v=12">
 </head>
 <body>
 <main class="wrap">
@@ -91,6 +91,7 @@ import { firebaseConfig, DOMINIO_EMPRESAS, MAX_MB, NOMBRE_DESPACHO, ALMACENAMIEN
 import { iniciarActividad, cerrarActividad } from "./actividad.js";
 import { etiquetaPeriodo, periodoAnterior, checklistDe, opcionesTipo, estadoChecklist, opcionesPeriodoHTML } from "./comun.js";
 import { iniciarPWA } from "./pwa.js";
+import { leerAvisos, enviarAvisos } from "./avisos.js";
 iniciarPWA(document.getElementById("bInstalar"));
 
 const app = initializeApp(firebaseConfig);
@@ -297,13 +298,18 @@ $("bSubir").onclick = async () => {
   if (!cola.length) return;
   subiendo = true; pintarCola(); msg("subMsg", "Enviando…");
   const nota = $("nota").value.trim().slice(0, 300);
+  const per = $("periodo").value, tipo = $("categoria").value, enviados = [];
   let ok = 0, fallos = 0;
   for (const it of cola) {
-    try { await subir(it, nota); it.estado = "ok"; ok++; }
+    try { await subir(it, nota); it.estado = "ok"; ok++; enviados.push(it.file.name); }
     catch (e) { console.error(e); it.estado = "error"; it.pct = 0; fallos++; }
   }
   cola = cola.filter(x => x.estado !== "ok");
   subiendo = false; pintarCola();
+  if (ok) leerAvisos(db).then(cfg => enviarAvisos(cfg, {
+    empresa: empData?.nombre || "Una empresa", cantidad: ok, archivos: enviados,
+    periodo: etiquetaPeriodo(per), tipo, nota
+  }, new URL("admin.html", location.href).href)).catch(() => {});
   if (!fallos) { $("nota").value = ""; msg("subMsg", `✓ ${ok} documento${ok > 1 ? "s enviados" : " enviado"} correctamente.`, "ok"); }
   else msg("subMsg", `${ok} enviados, ${fallos} con error. Revisa tu conexión y vuelve a intentar.`, "err");
 };

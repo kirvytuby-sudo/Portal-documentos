@@ -15,7 +15,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Panel Docs">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="stylesheet" href="estilos.css?v=11">
+<link rel="stylesheet" href="estilos.css?v=12">
 </head>
 <body>
 <main class="wrap wide">
@@ -150,6 +150,29 @@
 
     <!-- Usuarios (solo el dueño) -->
     <div id="tUsuarios" class="hidden">
+      <details class="card" id="cfgAvisos">
+        <summary class="sum"><b>🔔 Avisos por correo y WhatsApp</b><span class="muted small"> — te avisan cuando un cliente sube algo, aunque el panel esté cerrado</span></summary>
+        <div class="avisos-grid">
+          <div>
+            <label class="chk"><input type="checkbox" id="emActivo"> <b>Correo</b> <span class="muted small">(EmailJS, gratis hasta 200 al mes)</span></label>
+            <label class="lbl">Enviar avisos a (correo)</label><input id="emPara" type="email" placeholder="contabilidad@ejemplo.com">
+            <label class="lbl">Service ID</label><input id="emService" class="mono" placeholder="service_xxxxxxx">
+            <label class="lbl">Template ID</label><input id="emTemplate" class="mono" placeholder="template_xxxxxxx">
+            <label class="lbl">Public Key</label><input id="emKey" class="mono" placeholder="xxxxxxxxxxxxxxx">
+          </div>
+          <div>
+            <label class="chk"><input type="checkbox" id="waActivo"> <b>WhatsApp</b> <span class="muted small">(CallMeBot, gratis, a tu propio número)</span></label>
+            <label class="lbl">Tu número con lada (ej. +5215512345678)</label><input id="waTel" class="mono" inputmode="tel">
+            <label class="lbl">API key de CallMeBot</label><input id="waKey" class="mono">
+            <p class="muted small" style="margin-top:10px">Los avisos los manda el portal del cliente al terminar de subir: un aviso por envío, con la empresa, cuántos archivos, periodo, tipo y nota.</p>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="bAvGuardar">Guardar</button>
+          <button class="btn" id="bAvProbar">Enviar aviso de prueba</button>
+        </div>
+        <p id="avMsg" class="msg"></p>
+      </details>
       <div class="card">
         <h3>Agregar usuario</h3>
         <p class="muted small" style="margin-bottom:6px">Tendrá acceso a este panel y verá todas las empresas y documentos.</p>
@@ -224,6 +247,7 @@ import { firebaseConfig, ADMIN_EMAILS, DOMINIO_EMPRESAS, NOMBRE_DESPACHO, ALMACE
 import { iniciarActividad, cerrarActividad } from "./actividad.js";
 import { etiquetaPeriodo, periodoAnterior, checklistDe, opcionesTipo, estadoChecklist, opcionesPeriodoHTML, esOtros } from "./comun.js";
 import { iniciarPWA } from "./pwa.js";
+import { leerAvisos, enviarAvisos } from "./avisos.js";
 iniciarPWA(document.getElementById("bInstalar"));
 
 const app = initializeApp(firebaseConfig);
@@ -292,6 +316,7 @@ function iniciar(u) {
   $("yo").textContent = nombreUsuario(u.email);
   $("tabUsuarios").classList.toggle("hidden", !esDueno);
   $("tabActividad").classList.toggle("hidden", !esDueno);
+  if (esDueno) cargarCfgAvisos();
   iniciarActividad(db, u, "panel");
   if (esDueno) {
     unsubs.push(onSnapshot(collection(db, "sesiones"), s => { sesiones = s.docs.map(d => d.data()); renderActividad(); }, errorGeneral));
@@ -340,6 +365,36 @@ document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
   ["tBandeja","tEmpresas","tUsuarios","tActividad"].forEach(t => $(t).classList.toggle("hidden", t !== b.dataset.tab));
 });
 const irBandeja = empId => { $("fEstado").value = ""; verEmpresa(empId); document.querySelector('[data-tab="tBandeja"]').click(); };
+
+// ---------- Configuración de avisos (solo el dueño) ----------
+async function cargarCfgAvisos() {
+  const c = await leerAvisos(db), em = c.email || {}, wa = c.whatsapp || {};
+  $("emActivo").checked = !!em.activo; $("emPara").value = em.para || ""; $("emService").value = em.serviceId || "";
+  $("emTemplate").value = em.templateId || ""; $("emKey").value = em.publicKey || "";
+  $("waActivo").checked = !!wa.activo; $("waTel").value = wa.telefono || ""; $("waKey").value = wa.apikey || "";
+}
+const cfgDeForm = () => ({
+  email: { activo: $("emActivo").checked, para: $("emPara").value.trim(), serviceId: $("emService").value.trim(),
+           templateId: $("emTemplate").value.trim(), publicKey: $("emKey").value.trim() },
+  whatsapp: { activo: $("waActivo").checked, telefono: $("waTel").value.replace(/[^\d+]/g, ""), apikey: $("waKey").value.trim() }
+});
+$("bAvGuardar").onclick = async () => {
+  const c = cfgDeForm();
+  if (c.email.activo && !(c.email.para && c.email.serviceId && c.email.templateId && c.email.publicKey)) return msg("avMsg", "Para el correo llena los 4 campos.", "err");
+  if (c.whatsapp.activo && !(c.whatsapp.telefono && c.whatsapp.apikey)) return msg("avMsg", "Para WhatsApp pon tu número y tu API key.", "err");
+  try { await setDoc(doc(db, "ajustes", "avisos"), c); msg("avMsg", "✓ Avisos guardados.", "ok"); }
+  catch (e) { console.error(e); msg("avMsg", "No se pudo guardar: " + (e.code || e.message), "err"); }
+};
+$("bAvProbar").onclick = async () => {
+  const c = cfgDeForm();
+  if (!c.email.activo && !c.whatsapp.activo) return msg("avMsg", "Activa correo o WhatsApp primero.", "err");
+  msg("avMsg", "Enviando prueba…");
+  const r = await enviarAvisos(c, { empresa: "EMPRESA DE PRUEBA", cantidad: 2, archivos: ["estado_cuenta.pdf", "nomina.xlsx"],
+    periodo: "Prueba", tipo: "Estados de cuenta", nota: "Este es un aviso de prueba" }, linkPanel());
+  const err = r.filter(x => x.status === "rejected");
+  msg("avMsg", err.length ? "Falló: " + err.map(x => x.reason?.message || x.reason).join(", ") + ". Revisa los datos."
+    : "✓ Prueba enviada. Revisa tu correo y/o WhatsApp en un minuto.", err.length ? "err" : "ok");
+};
 
 // ---------- Usuarios (solo el dueño) ----------
 let usuarios = [], passUsu = new Map(), passVisible = new Set();
@@ -799,6 +854,10 @@ async function visorAbrir(i) {
   const esTexto = /xml|csv|text/.test(t) || ["xml", "csv", "txt"].includes(e);
   try {
     let src;
+    if (esPdf && esMovil()) {
+      const b = await obtenerBlob(a); if (vistos[vIdx] !== a) return;
+      return renderPdfMovil(b, cuerpo, a);
+    }
     if (a.url && (esImg || esPdf)) src = a.url;
     else if (esImg || esPdf || esTexto) { const b = await obtenerBlob(a); if (vistos[vIdx] !== a) return; vUrl = src = URL.createObjectURL(b); if (esTexto) { cuerpo.innerHTML = `<pre class="visor-texto">${esc(formatearXML(await b.text()))}</pre>`; return; } }
     if (esImg) cuerpo.innerHTML = `<img src="${src}" alt="">`;
@@ -817,6 +876,38 @@ function formatearXML(t) {
     if (/^<[^!?\/][^>]*[^\/]>$/.test(l) && !/<\//.test(l)) n++;
     return r;
   }).join("\n");
+}
+// En celular el navegador no muestra PDFs dentro de la página: se dibujan con PDF.js
+const esMovil = () => matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+let pdfjsCarga = null;
+const cargarPdfJs = () => pdfjsCarga ??= new Promise((ok, mal) => {
+  const sc = document.createElement("script");
+  sc.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+  sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; ok(window.pdfjsLib); };
+  sc.onerror = mal; document.head.appendChild(sc);
+});
+async function renderPdfMovil(blob, cuerpo, a) {
+  try {
+    const pdfjs = await cargarPdfJs();
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+    if (vistos[vIdx] !== a) return;
+    cuerpo.innerHTML = '<div class="pdf-paginas"></div>';
+    const cont = cuerpo.firstChild, ancho = Math.max(280, cuerpo.clientWidth - 16), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const max = Math.min(pdf.numPages, 40);
+    for (let i = 1; i <= max; i++) {
+      if (vistos[vIdx] !== a) return;
+      const pag = await pdf.getPage(i), vp1 = pag.getViewport({ scale: 1 });
+      const vp = pag.getViewport({ scale: (ancho / vp1.width) * dpr });
+      const cv = document.createElement("canvas"); cv.width = vp.width; cv.height = vp.height; cv.style.width = ancho + "px";
+      cont.appendChild(cv);
+      await pag.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+    }
+    if (pdf.numPages > max) cont.insertAdjacentHTML("beforeend", `<div class="visor-msg">Se muestran ${max} de ${pdf.numPages} páginas. Descárgalo para ver todo.</div>`);
+  } catch (e) {
+    console.error(e);
+    cuerpo.innerHTML = '<div class="visor-msg">No se pudo mostrar el PDF aquí.<br><br><button class="btn primary" id="vDesc3">⬇ Descargar para abrirlo</button></div>';
+    $("vDesc3")?.addEventListener("click", visorDescargar);
+  }
 }
 function visorCerrar() {
   $("visor").classList.add("hidden"); document.body.style.overflow = ""; $("vCuerpo").innerHTML = "";

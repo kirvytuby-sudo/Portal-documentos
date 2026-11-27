@@ -138,3 +138,10 @@ img.logo{width:48px;height:48px;border-radius:14px;background:none;display:block
   .filtros.det,.filtros-emp,.sel-doble{grid-template-columns:1fr}
   .visor{padding:0}.visor-caja{height:100vh;border-radius:0}
 }
+/* Avisos y PDF en celular */
+.avisos-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:12px}
+.chk{display:flex;align-items:center;gap:8px;cursor:pointer}
+.chk input{width:auto}
+.pdf-paginas{display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px;width:100%;align-self:flex-start}
+.pdf-paginas canvas{background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3);max-width:100%}
+@media (max-width:760px){.avisos-grid{grid-template-columns:1fr}}
