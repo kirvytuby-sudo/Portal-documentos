@@ -200,8 +200,35 @@ function renderArchivos() {
   porRuta = new Map(vistos.map(a => [a.path, a]));
   $("bRevTodo").disabled = !vistos.some(a => !a.revisado);
   if (!vistos.length) { $("listaArch").innerHTML = `<div class="card muted" style="text-align:center">${est === "pend" ? "🎉 No hay documentos pendientes." : "Sin documentos."}</div>`; return; }
-  $("listaArch").innerHTML = vistos.map(a => {
-    const e = empresas.get(a.empresaId), img = a.url && (a.tipo || "").startsWith("image/") && !/hei[cf]/.test(a.tipo);
+  // Agrupar por empresa: primero las que tienen pendientes, luego por envío más reciente
+  const grupos = new Map();
+  vistos.forEach(a => { if (!grupos.has(a.empresaId)) grupos.set(a.empresaId, []); grupos.get(a.empresaId).push(a); });
+  const orden = [...grupos.entries()].sort(([, x], [, y]) => {
+    const px = x.some(a => !a.revisado), py = y.some(a => !a.revisado);
+    if (px !== py) return py - px;
+    return (y[0].fecha?.toMillis?.() || 0) - (x[0].fecha?.toMillis?.() || 0);
+  });
+  const unaSola = orden.length === 1;
+  $("listaArch").innerHTML = orden.map(([id, arch]) => {
+    const e = empresas.get(id), pend = arch.filter(a => !a.revisado).length;
+    const abierta = unaSola || abiertas.has(id) || (!cerradas.has(id) && pend > 0);
+    const ult = arch[0].fecha?.toDate?.();
+    return `<div class="grupo">
+      <div class="grupo-head" data-grupo="${esc(id)}">
+        <span class="flecha">${abierta ? "▾" : "▸"}</span>
+        <div class="info"><div class="nm">${esc(e?.nombre || id)}</div>
+          <div class="muted small">${arch.length} documento${arch.length > 1 ? "s" : ""} · último: ${fmt(ult)}</div></div>
+        ${pend ? `<span class="tag warn">${pend} pendiente${pend > 1 ? "s" : ""}</span>` : '<span class="tag ok">Al día</span>'}
+        ${pend ? `<button class="btn sm" data-act="revgrupo" data-emp="${esc(id)}">✓ Revisar todos</button>` : ""}
+      </div>
+      ${abierta ? `<div class="grupo-body">${arch.map(filaArchivo).join("")}</div>` : ""}
+    </div>`;
+  }).join("");
+}
+const abiertas = new Set(), cerradas = new Set();
+function filaArchivo(a) {
+  {
+    const img = a.url && (a.tipo || "").startsWith("image/") && !/hei[cf]/.test(a.tipo);
     const abrir = a.url
       ? `<a class="btn sm" href="${esc(a.url)}" target="_blank" rel="noopener">Abrir</a>`
       : `<button class="btn sm" data-act="abrir" data-p="${esc(a.path)}">Abrir</button>`;
@@ -209,7 +236,7 @@ function renderArchivos() {
       <div class="ico">${img ? `<img loading="lazy" src="${esc(a.url)}" alt="">` : esc(ext(a.nombre))}</div>
       <div class="info">
         <div class="nm">${esc(a.nombre)}</div>
-        <div class="muted small"><b>${esc(e?.nombre || a.empresaId)}</b> · ${fmt(a.fecha?.toDate?.())} · ${tam(a.tamano)}</div>
+        <div class="muted small">${fmt(a.fecha?.toDate?.())} · ${tam(a.tamano)}</div>
         ${a.nota ? `<div class="small nota">“${esc(a.nota)}”</div>` : ""}
       </div>
       <span class="tag ${a.revisado ? "ok" : "warn"}">${a.revisado ? "Revisado" : "Pendiente"}</span>
@@ -218,10 +245,24 @@ function renderArchivos() {
         <button class="btn sm" data-act="rev" data-p="${esc(a.path)}">${a.revisado ? "Desmarcar" : "✓ Revisado"}</button>
         <button class="btn sm danger" data-act="del" data-p="${esc(a.path)}">Eliminar</button>
       </div></div>`;
-  }).join("");
+  }
 }
 $("listaArch").onclick = async e => {
-  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const b = e.target.closest("button[data-act]");
+  if (b?.dataset.act === "revgrupo") {
+    const p = vistos.filter(a => a.empresaId === b.dataset.emp && !a.revisado).slice(0, 450);
+    const n = empresas.get(b.dataset.emp)?.nombre || "";
+    if (!p.length || !confirm(`¿Marcar ${p.length} documento(s) de ${n} como revisados?`)) return;
+    const wb = writeBatch(db); p.forEach(a => wb.update(doc(db, a.path), { revisado: true }));
+    await wb.commit(); toast(`${p.length} marcados como revisados`); return;
+  }
+  const h = !b && e.target.closest("[data-grupo]");
+  if (h) {
+    const id = h.dataset.grupo, abierta = !!h.parentElement.querySelector(".grupo-body");
+    if (abierta) { abiertas.delete(id); cerradas.add(id); } else { cerradas.delete(id); abiertas.add(id); }
+    return renderArchivos();
+  }
+  if (!b) return;
   const a = porRuta.get(b.dataset.p); if (!a) return;
   if (b.dataset.act === "rev") await updateDoc(doc(db, a.path), { revisado: !a.revisado });
   if (b.dataset.act === "abrir") abrirPartes(a);

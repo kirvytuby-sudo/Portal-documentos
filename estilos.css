@@ -75,3 +75,12 @@ a{color:var(--pri)}
   .item{flex-wrap:wrap}
   .acciones{width:100%;justify-content:flex-start}
 }
+/* Bandeja agrupada por empresa */
+.grupo{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden}
+.grupo-head{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;user-select:none}
+.grupo-head:hover{background:var(--pri-soft)}
+.grupo-head .nm{font-size:16px}
+.flecha{width:16px;color:var(--muted);font-size:14px;flex:none}
+.grupo-body{display:flex;flex-direction:column;gap:8px;padding:0 12px 12px;border-top:1px solid var(--line);padding-top:12px;background:var(--bg)}
+.lista{gap:12px}
+@media (max-width:760px){.grupo-head{flex-wrap:wrap}}
