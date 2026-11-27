@@ -1,0 +1,30 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ⚠️ Cambia por tu correo de administrador (el mismo que en config.js)
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email in ['kirvytuby@gmail.com'];
+    }
+    function isEmpresa(id) {
+      return request.auth != null
+        && request.auth.token.email == id + '@empresas.example.com';
+    }
+
+    // Cada empresa solo puede subir y ver su propia carpeta
+    match /empresas/{id}/{archivo} {
+      allow read: if isAdmin() || isEmpresa(id);
+      allow create: if isEmpresa(id)
+        && firestore.get(/databases/(default)/documents/empresas/$(id)).data.activo == true
+        && request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType.matches('(image/.*|application/pdf|text/xml|application/xml|text/csv|application/zip|application/x-zip-compressed|application/msword|application/vnd[.].*)');
+      allow delete: if isAdmin();
+    }
+
+    // Todo lo demás está cerrado
+    match /{todo=**} {
+      allow read, write: if false;
+    }
+  }
+}

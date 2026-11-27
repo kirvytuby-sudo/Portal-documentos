@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Panel · Portal de Documentos</title>
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+<main class="wrap wide">
+  <header class="brand row between">
+    <div class="row"><div class="logo">📁</div><div><h1 id="titulo">Portal de Documentos</h1><p class="muted small">Panel de administrador</p></div></div>
+    <div class="row hidden" id="sesion"><span class="muted small" id="yo"></span><button class="btn ghost sm" id="bSalir">Salir</button></div>
+  </header>
+
+  <!-- Login -->
+  <section id="vLogin" class="card hidden" style="max-width:420px;margin:40px auto">
+    <h2>Iniciar sesión</h2>
+    <form id="fLogin">
+      <label class="lbl">Correo</label><input id="lCorreo" type="email" autocomplete="username" required>
+      <label class="lbl">Contraseña</label><input id="lPass" type="password" autocomplete="current-password" required>
+      <button class="btn primary full">Entrar</button>
+    </form>
+    <p id="loginMsg" class="msg"></p>
+  </section>
+
+  <!-- Panel -->
+  <section id="vPanel" class="hidden">
+    <div class="stats">
+      <div class="stat"><span class="muted small">Empresas activas</span><b id="sAct">0</b></div>
+      <div class="stat"><span class="muted small">Pendientes de revisar</span><b id="sPend">0</b></div>
+      <div class="stat"><span class="muted small">Recibidos hoy</span><b id="sHoy">0</b></div>
+      <div class="stat"><span class="muted small">Empresas con pendientes</span><b id="sEmpP">0</b></div>
+    </div>
+
+    <nav class="tabs">
+      <button class="tab on" data-tab="tBandeja">Bandeja</button>
+      <button class="tab" data-tab="tEmpresas">Empresas</button>
+    </nav>
+
+    <!-- Bandeja -->
+    <div id="tBandeja">
+      <div id="indiceMsg" class="aviso hidden"></div>
+      <div class="filtros">
+        <select id="fEmpresa"><option value="">Todas las empresas</option></select>
+        <select id="fEstado"><option value="pend">Pendientes</option><option value="">Todos</option><option value="rev">Revisados</option></select>
+        <input id="fTexto" placeholder="Buscar por nombre de archivo o nota">
+        <button class="btn" id="bRevTodo">✓ Marcar visibles como revisados</button>
+      </div>
+      <div id="listaArch" class="lista"><p class="muted small">Cargando…</p></div>
+    </div>
+
+    <!-- Empresas -->
+    <div id="tEmpresas" class="hidden">
+      <div class="card">
+        <h3>Agregar empresa</h3>
+        <form id="fAlta" class="alta">
+          <div><label class="lbl">Nombre o razón social *</label><input id="aNombre" required maxlength="120"></div>
+          <div><label class="lbl">RFC</label><input id="aRfc" maxlength="13"></div>
+          <div><label class="lbl">WhatsApp (10 dígitos)</label><input id="aTel" inputmode="tel" maxlength="15"></div>
+          <button class="btn primary" id="bAlta">Agregar</button>
+        </form>
+        <p id="altaMsg" class="msg"></p>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <input id="eBuscar" class="grow" placeholder="Buscar empresa por nombre o RFC" style="flex:1">
+        <select id="eEstado" style="width:auto"><option value="">Todas</option><option value="act">Activas</option><option value="inact">Inactivas</option><option value="pend">Con pendientes</option></select>
+      </div>
+      <div id="listaEmp" class="lista"></div>
+    </div>
+  </section>
+</main>
+<div id="toast" class="toast hidden"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, collectionGroup, doc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+import { firebaseConfig, ADMIN_EMAILS, DOMINIO_EMPRESAS, NOMBRE_DESPACHO } from "./config.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app), db = getFirestore(app);
+let st = null; const storage = () => (st ??= getStorage(app));
+// App secundaria: crea / cambia PIN de cuentas de empresas sin cerrar tu sesión
+const auth2 = getAuth(initializeApp(firebaseConfig, "altas"));
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const msg = (id, t, cls = "") => { $(id).textContent = t; $(id).className = "msg " + cls; };
+const tam = b => b < 1048576 ? (b/1024).toFixed(0) + " KB" : (b/1048576).toFixed(1) + " MB";
+const ext = n => (n.split(".").pop() || "").toLowerCase().slice(0,4);
+const correoDe = id => `${id}@${DOMINIO_EMPRESAS}`;
+const linkDe = id => new URL("index.html", location.href).href + "?e=" + id;
+const fmt = d => d ? d.toLocaleString("es-MX", { dateStyle:"medium", timeStyle:"short" }) : "—";
+const ALF = "abcdefghijkmnpqrstuvwxyz23456789";
+const genId = (n = 12) => Array.from(crypto.getRandomValues(new Uint8Array(n)), x => ALF[x % ALF.length]).join("");
+const genPin = () => String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, "0");
+const telWa = t => { const d = (t || "").replace(/\D/g, ""); return d.length === 10 ? "52" + d : d; };
+let toastT; const toast = t => { $("toast").textContent = t; $("toast").classList.remove("hidden"); clearTimeout(toastT); toastT = setTimeout(() => $("toast").classList.add("hidden"), 3500); };
+
+document.title = "Panel · " + NOMBRE_DESPACHO; $("titulo").textContent = NOMBRE_DESPACHO;
+
+let empresas = new Map(), pins = new Map(), todos = [], filtrados = null, vistos = [], porRuta = new Map();
+let unsubs = [], unsubEmp = null, pinVisible = new Set();
+const admins = ADMIN_EMAILS.map(x => x.toLowerCase());
+
+// ---------- Sesión ----------
+onAuthStateChanged(auth, u => {
+  if (u && admins.includes((u.email || "").toLowerCase())) iniciar(u);
+  else {
+    if (u) { signOut(auth); msg("loginMsg", "Esta cuenta no es de administrador.", "err"); }
+    unsubs.forEach(f => f()); unsubs = []; unsubEmp?.();
+    $("vPanel").classList.add("hidden"); $("sesion").classList.add("hidden"); $("vLogin").classList.remove("hidden");
+  }
+});
+$("fLogin").onsubmit = async e => {
+  e.preventDefault(); msg("loginMsg", "Entrando…");
+  try { await signInWithEmailAndPassword(auth, $("lCorreo").value.trim(), $("lPass").value); msg("loginMsg", ""); }
+  catch { msg("loginMsg", "Correo o contraseña incorrectos.", "err"); }
+};
+$("bSalir").onclick = () => signOut(auth);
+
+function iniciar(u) {
+  $("vLogin").classList.add("hidden"); $("vPanel").classList.remove("hidden"); $("sesion").classList.remove("hidden");
+  $("yo").textContent = u.email;
+  unsubs.push(onSnapshot(query(collection(db, "empresas"), orderBy("nombre")), s => {
+    empresas = new Map(s.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
+    llenarSelect(); todoRender();
+  }, errorGeneral));
+  unsubs.push(onSnapshot(collection(db, "privado"), s => {
+    pins = new Map(s.docs.map(d => [d.id, d.data().pin])); renderEmpresas();
+  }, errorGeneral));
+  // Los 1000 archivos más recientes de todas las empresas
+  unsubs.push(onSnapshot(query(collectionGroup(db, "archivos"), orderBy("fecha", "desc"), limit(1000)), s => {
+    $("indiceMsg").classList.add("hidden");
+    todos = s.docs.map(d => ({ path: d.ref.path, ...d.data() })); todoRender();
+  }, errorIndice));
+}
+function errorGeneral(e) { console.error(e); toast("Error de permisos: revisa tu correo en las reglas."); }
+function errorIndice(e) {
+  console.error(e);
+  const url = (e.message.match(/https:\/\/\S+/) || [])[0];
+  $("indiceMsg").innerHTML = e.code === "failed-precondition" && url
+    ? `Falta crear un índice (solo se hace una vez). <a href="${esc(url)}" target="_blank" rel="noopener"><b>Haz clic aquí para crearlo</b></a>, pulsa "Guardar" y espera 2–5 minutos; luego recarga esta página.`
+    : "No se pudieron cargar los archivos: " + esc(e.message);
+  $("indiceMsg").classList.remove("hidden");
+  $("listaArch").innerHTML = "";
+}
+function todoRender() { renderArchivos(); renderEmpresas(); stats(); }
+
+// ---------- Pestañas ----------
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+  ["tBandeja","tEmpresas"].forEach(t => $(t).classList.toggle("hidden", t !== b.dataset.tab));
+});
+const irBandeja = empId => { $("fEmpresa").value = empId; $("fEstado").value = ""; cambiarEmpresa(); document.querySelector('[data-tab="tBandeja"]').click(); };
+
+// ---------- Estadísticas ----------
+function stats() {
+  const hoy = new Date().toDateString();
+  const pend = todos.filter(a => !a.revisado);
+  $("sAct").textContent = [...empresas.values()].filter(e => e.activo).length;
+  $("sPend").textContent = pend.length;
+  $("sHoy").textContent = todos.filter(a => a.fecha?.toDate?.().toDateString() === hoy).length;
+  $("sEmpP").textContent = new Set(pend.map(a => a.empresaId)).size;
+}
+
+// ---------- Bandeja ----------
+function llenarSelect() {
+  const v = $("fEmpresa").value;
+  $("fEmpresa").innerHTML = '<option value="">Todas las empresas</option>' +
+    [...empresas.values()].map(e => `<option value="${e.id}">${esc(e.nombre)}</option>`).join("");
+  $("fEmpresa").value = empresas.has(v) ? v : "";
+}
+function cambiarEmpresa() {
+  unsubEmp?.(); unsubEmp = null; filtrados = null;
+  const id = $("fEmpresa").value;
+  if (id) // historial completo de la empresa elegida
+    unsubEmp = onSnapshot(query(collection(db, "empresas", id, "archivos"), orderBy("fecha", "desc"), limit(1000)), s => {
+      filtrados = s.docs.map(d => ({ path: d.ref.path, ...d.data() })); renderArchivos();
+    }, errorGeneral);
+  renderArchivos();
+}
+$("fEmpresa").onchange = cambiarEmpresa;
+$("fEstado").onchange = renderArchivos;
+$("fTexto").oninput = renderArchivos;
+
+function renderArchivos() {
+  const est = $("fEstado").value, txt = $("fTexto").value.trim().toLowerCase(), emp = $("fEmpresa").value;
+  let base = emp ? (filtrados ?? todos.filter(a => a.empresaId === emp)) : todos;
+  vistos = base.filter(a =>
+    (!est || (est === "pend" ? !a.revisado : a.revisado)) &&
+    (!txt || (a.nombre + " " + (a.nota || "")).toLowerCase().includes(txt)));
+  porRuta = new Map(vistos.map(a => [a.path, a]));
+  $("bRevTodo").disabled = !vistos.some(a => !a.revisado);
+  if (!vistos.length) { $("listaArch").innerHTML = `<div class="card muted" style="text-align:center">${est === "pend" ? "🎉 No hay documentos pendientes." : "Sin documentos."}</div>`; return; }
+  $("listaArch").innerHTML = vistos.map(a => {
+    const e = empresas.get(a.empresaId), img = a.url && (a.tipo || "").startsWith("image/") && !/hei[cf]/.test(a.tipo);
+    const abrir = a.url
+      ? `<a class="btn sm" href="${esc(a.url)}" target="_blank" rel="noopener">Abrir</a>`
+      : `<button class="btn sm" data-act="abrir" data-p="${esc(a.path)}">Abrir</button>`;
+    return `<div class="item ${a.revisado ? "" : "nuevo"}">
+      <div class="ico">${img ? `<img loading="lazy" src="${esc(a.url)}" alt="">` : esc(ext(a.nombre))}</div>
+      <div class="info">
+        <div class="nm">${esc(a.nombre)}</div>
+        <div class="muted small"><b>${esc(e?.nombre || a.empresaId)}</b> · ${fmt(a.fecha?.toDate?.())} · ${tam(a.tamano)}</div>
+        ${a.nota ? `<div class="small nota">“${esc(a.nota)}”</div>` : ""}
+      </div>
+      <span class="tag ${a.revisado ? "ok" : "warn"}">${a.revisado ? "Revisado" : "Pendiente"}</span>
+      <div class="acciones">
+        ${abrir}
+        <button class="btn sm" data-act="rev" data-p="${esc(a.path)}">${a.revisado ? "Desmarcar" : "✓ Revisado"}</button>
+        <button class="btn sm danger" data-act="del" data-p="${esc(a.path)}">Eliminar</button>
+      </div></div>`;
+  }).join("");
+}
+$("listaArch").onclick = async e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const a = porRuta.get(b.dataset.p); if (!a) return;
+  if (b.dataset.act === "rev") await updateDoc(doc(db, a.path), { revisado: !a.revisado });
+  if (b.dataset.act === "abrir") abrirPartes(a);
+  if (b.dataset.act === "del") {
+    if (!confirm(`¿Eliminar definitivamente "${a.nombre}"? No se puede deshacer.`)) return;
+    try {
+      if (a.ruta) {
+        try { await deleteObject(ref(storage(), a.ruta)); } catch (err) { if (err.code !== "storage/object-not-found") throw err; }
+        await deleteDoc(doc(db, a.path));
+      } else {
+        const s = await getDocs(collection(db, a.path, "partes"));
+        const wb = writeBatch(db); s.docs.forEach(d => wb.delete(d.ref)); wb.delete(doc(db, a.path));
+        await wb.commit();
+      }
+      toast("Archivo eliminado");
+    } catch (err) { console.error(err); toast("No se pudo eliminar el archivo."); }
+  }
+};
+// Modo gratis: arma el archivo desde sus partes y lo abre o descarga
+async function abrirPartes(a) {
+  const ver = /^(image\/|application\/pdf)/.test(a.tipo || "") && !/hei[cf]/.test(a.tipo);
+  const w = ver ? window.open("", "_blank") : null;
+  if (w) w.document.write('<p style="font:16px system-ui;padding:20px">Cargando…</p>');
+  else toast("Descargando…");
+  try {
+    const s = await getDocs(collection(db, a.path, "partes"));
+    const partes = s.docs.sort((x, y) => x.id - y.id).map(d => Uint8Array.from(atob(d.data().d), c => c.charCodeAt(0)));
+    const url = URL.createObjectURL(new Blob(partes, { type: a.tipo || "application/octet-stream" }));
+    if (w) w.location.href = url;
+    else { const l = document.createElement("a"); l.href = url; l.download = a.nombre; document.body.appendChild(l); l.click(); l.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 300000);
+  } catch (err) { console.error(err); w?.close(); toast("No se pudo abrir el archivo."); }
+}
+
+$("bRevTodo").onclick = async () => {
+  const p = vistos.filter(a => !a.revisado).slice(0, 450);
+  if (!p.length || !confirm(`¿Marcar ${p.length} documento(s) como revisados?`)) return;
+  const wb = writeBatch(db); p.forEach(a => wb.update(doc(db, a.path), { revisado: true }));
+  await wb.commit(); toast(`${p.length} marcados como revisados`);
+};
+
+// ---------- Empresas ----------
+$("eBuscar").oninput = renderEmpresas; $("eEstado").onchange = renderEmpresas;
+function renderEmpresas() {
+  const txt = $("eBuscar").value.trim().toLowerCase(), f = $("eEstado").value;
+  const pend = {}, tot = {};
+  todos.forEach(a => { tot[a.empresaId] = (tot[a.empresaId] || 0) + 1; if (!a.revisado) pend[a.empresaId] = (pend[a.empresaId] || 0) + 1; });
+  const lista = [...empresas.values()].filter(e =>
+    (!txt || (e.nombre + " " + (e.rfc || "")).toLowerCase().includes(txt)) &&
+    (!f || (f === "act" ? e.activo : f === "inact" ? !e.activo : pend[e.id])));
+  $("listaEmp").innerHTML = !lista.length ? '<div class="card muted" style="text-align:center">Sin empresas.</div>' :
+    lista.map(e => {
+      const pin = pins.get(e.id) || "—", ver = pinVisible.has(e.id);
+      return `<div class="item">
+        <div class="info">
+          <div class="nm">${esc(e.nombre)} ${e.activo ? "" : '<span class="tag off">Inactiva</span>'} ${pend[e.id] ? `<span class="tag warn">${pend[e.id]} pendiente${pend[e.id] > 1 ? "s" : ""}</span>` : ""}</div>
+          <div class="muted small">${e.rfc ? esc(e.rfc) + " · " : ""}${e.telefono ? "📱 " + esc(e.telefono) + " · " : ""}${tot[e.id] || 0} recibidos recientes</div>
+          <div class="small">PIN: <span class="mono">${ver ? esc(pin) : "••••••"}</span> <button class="x" data-act="ver" data-id="${e.id}" title="Mostrar PIN">${ver ? "🙈" : "👁"}</button></div>
+        </div>
+        <div class="acciones">
+          <button class="btn sm" data-act="arch" data-id="${e.id}">Ver archivos</button>
+          <button class="btn sm" data-act="copiar" data-id="${e.id}">Copiar acceso</button>
+          <button class="btn sm wa" data-act="wa" data-id="${e.id}">WhatsApp</button>
+          <button class="btn sm" data-act="editar" data-id="${e.id}">Editar</button>
+          <button class="btn sm" data-act="pin" data-id="${e.id}">Nuevo PIN</button>
+          <button class="btn sm ${e.activo ? "danger" : ""}" data-act="activo" data-id="${e.id}">${e.activo ? "Desactivar" : "Activar"}</button>
+        </div></div>`;
+    }).join("");
+}
+const textoAcceso = e => `Hola, ${e.nombre}. Este es tu portal para enviarnos tus documentos:\n${linkDe(e.id)}\n\nTu PIN de acceso: ${pins.get(e.id)}\n\nPuedes subir PDFs, fotos, XML o Excel desde tu celular o computadora.`;
+
+$("listaEmp").onclick = async ev => {
+  const b = ev.target.closest("button[data-act]"); if (!b) return;
+  const e = empresas.get(b.dataset.id); if (!e) return;
+  switch (b.dataset.act) {
+    case "ver": pinVisible.has(e.id) ? pinVisible.delete(e.id) : pinVisible.add(e.id); renderEmpresas(); break;
+    case "arch": irBandeja(e.id); break;
+    case "copiar": await navigator.clipboard.writeText(textoAcceso(e)); toast("Link y PIN copiados"); break;
+    case "wa": window.open(`https://wa.me/${telWa(e.telefono)}?text=${encodeURIComponent(textoAcceso(e))}`, "_blank"); break;
+    case "activo":
+      if (e.activo && !confirm(`¿Desactivar a ${e.nombre}? Ya no podrá subir documentos.`)) return;
+      await updateDoc(doc(db, "empresas", e.id), { activo: !e.activo }); toast(e.activo ? "Empresa desactivada" : "Empresa activada"); break;
+    case "editar": {
+      const nombre = prompt("Nombre o razón social:", e.nombre); if (nombre === null || !nombre.trim()) return;
+      const rfc = prompt("RFC:", e.rfc || ""); if (rfc === null) return;
+      const tel = prompt("WhatsApp (10 dígitos):", e.telefono || ""); if (tel === null) return;
+      await updateDoc(doc(db, "empresas", e.id), { nombre: nombre.trim(), rfc: rfc.trim().toUpperCase(), telefono: tel.replace(/[^\d+]/g, "") });
+      toast("Datos actualizados"); break;
+    }
+    case "pin": {
+      const viejo = pins.get(e.id); if (!viejo) return toast("No hay PIN guardado para esta empresa.");
+      if (!confirm(`¿Generar un PIN nuevo para ${e.nombre}? El anterior dejará de funcionar.`)) return;
+      const nuevo = genPin();
+      try {
+        const cred = await signInWithEmailAndPassword(auth2, correoDe(e.id), viejo);
+        await updatePassword(cred.user, nuevo); await signOut(auth2);
+        await setDoc(doc(db, "privado", e.id), { pin: nuevo });
+        pinVisible.add(e.id); toast("PIN nuevo: " + nuevo);
+      } catch (err) { console.error(err); toast("No se pudo cambiar el PIN: " + err.code); }
+      break;
+    }
+  }
+};
+
+$("fAlta").onsubmit = async ev => {
+  ev.preventDefault();
+  const nombre = $("aNombre").value.trim(); if (!nombre) return;
+  const id = genId(), pin = genPin();
+  $("bAlta").disabled = true; msg("altaMsg", "Creando…");
+  try {
+    await createUserWithEmailAndPassword(auth2, correoDe(id), pin);
+    await signOut(auth2);
+    await setDoc(doc(db, "empresas", id), {
+      nombre, rfc: $("aRfc").value.trim().toUpperCase(), telefono: $("aTel").value.replace(/[^\d+]/g, ""),
+      activo: true, creado: serverTimestamp()
+    });
+    await setDoc(doc(db, "privado", id), { pin });
+    $("fAlta").reset(); pinVisible.add(id);
+    msg("altaMsg", `✓ ${nombre} creada. PIN: ${pin}. Usa "WhatsApp" o "Copiar acceso" para enviárselo.`, "ok");
+  } catch (err) { console.error(err); msg("altaMsg", "No se pudo crear: " + (err.code || err.message), "err"); }
+  finally { $("bAlta").disabled = false; }
+};
+</script>
+</body>
+</html>

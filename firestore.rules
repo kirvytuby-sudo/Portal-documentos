@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ⚠️ Cambia por tu correo de administrador (el mismo que en config.js)
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email in ['kirvytuby@gmail.com'];
+    }
+    // Cada empresa inicia sesión como <id>@empresas.example.com con su PIN
+    function isEmpresa(id) {
+      return request.auth != null
+        && request.auth.token.email == id + '@empresas.example.com';
+    }
+    function activa(id) {
+      return get(/databases/$(database)/documents/empresas/$(id)).data.activo == true;
+    }
+
+    // Datos de la empresa (sin PIN). La empresa solo puede leer el suyo.
+    match /empresas/{id} {
+      allow read: if isAdmin() || isEmpresa(id);
+      allow write: if isAdmin();
+
+      // Registro de cada archivo subido
+      match /archivos/{archivoId} {
+        allow read: if isAdmin() || (isEmpresa(id) && activa(id));
+        allow create: if isEmpresa(id) && activa(id)
+          && request.resource.data.keys().hasOnly(['nombre','ruta','url','tipo','tamano','nota','fecha','revisado','empresaId','almacen','partes'])
+          && request.resource.data.empresaId == id
+          && request.resource.data.revisado == false
+          && request.resource.data.fecha == request.time
+          && (!('ruta' in request.resource.data) || request.resource.data.ruta.matches('empresas/' + id + '/.*'))
+          && request.resource.data.nota.size() <= 300;
+        allow update, delete: if isAdmin();
+
+        // Modo gratis: el contenido del archivo, en partes
+        match /partes/{n} {
+          allow read: if isAdmin() || (isEmpresa(id) && activa(id));
+          allow create: if isEmpresa(id) && activa(id)
+            && request.resource.data.keys().hasOnly(['d'])
+            && request.resource.data.d is string
+            && request.resource.data.d.size() <= 820000;
+          allow delete: if isAdmin();
+        }
+      }
+    }
+
+    // PINs: solo el administrador
+    match /privado/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // Bandeja general (consulta de todos los archivos): solo el administrador
+    match /{path=**}/archivos/{archivoId} {
+      allow read: if isAdmin();
+    }
+  }
+}
