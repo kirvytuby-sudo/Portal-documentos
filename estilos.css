@@ -145,3 +145,8 @@ img.logo{width:48px;height:48px;border-radius:14px;background:none;display:block
 .pdf-paginas{display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px;width:100%;align-self:flex-start}
 .pdf-paginas canvas{background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3);max-width:100%}
 @media (max-width:760px){.avisos-grid{grid-template-columns:1fr}}
+.tg-box{margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.tg-pasos{margin:8px 0 10px 18px;padding:0;line-height:1.7}
+.tg-pasos code{background:var(--card);padding:1px 6px;border-radius:6px}
+.tg-campos{display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end}
+@media (max-width:760px){.tg-campos{grid-template-columns:1fr}}

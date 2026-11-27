@@ -1,5 +1,5 @@
 // Service worker: permite instalar la app y abrirla aunque falle la red
-const CACHE = "portal-docs-v2";
+const CACHE = "portal-docs-v3";
 const BASE = ["./", "index.html", "admin.html", "estilos.css", "config.js", "actividad.js", "comun.js", "pwa.js", "avisos.js",
   "logo.svg", "favicon.png", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => {

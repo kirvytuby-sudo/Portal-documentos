@@ -1,4 +1,4 @@
-// Avisos fuera del panel: correo (EmailJS) y WhatsApp (CallMeBot)
+// Avisos fuera del panel: Telegram (gratis), correo (EmailJS) y WhatsApp (CallMeBot)
 // La configuración vive en Firestore: ajustes/avisos (la edita el dueño desde el panel)
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -35,5 +35,23 @@ export async function enviarAvisos(cfg, datos, linkPanel) {
     // El servicio no permite leer la respuesta desde el navegador; se envía "a ciegas"
     tareas.push(fetch(url, { mode: "no-cors" }));
   }
+  const tg = cfg.telegram || {};
+  if (tg.activo && tg.token && tg.chatId) {
+    const texto = `📥 ${resumen}\n\n${lista}${datos.nota ? `\n\nNota: ${datos.nota}` : ""}\n\nAbrir el panel: ${linkPanel}`;
+    tareas.push(fetch(`https://api.telegram.org/bot${tg.token}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: tg.chatId, text: texto, disable_web_page_preview: true })
+    }).then(async r => { if (!r.ok) throw new Error("Telegram: " + ((await r.json().catch(() => ({}))).description || r.status)); }));
+  }
   return Promise.allSettled(tareas);
+}
+
+// Busca el chat de quien le escribió al bot (para no tener que copiar el número de chat a mano)
+export async function detectarChatTelegram(token) {
+  const r = await fetch(`https://api.telegram.org/bot${token}/getUpdates`);
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.description || "Token no válido");
+  const m = [...(j.result || [])].reverse().map(u => u.message || u.channel_post || u.my_chat_member).find(x => x?.chat);
+  if (!m) throw new Error("El bot aún no recibe mensajes. Escríbele /start desde Telegram y vuelve a intentar.");
+  return { id: String(m.chat.id), nombre: m.chat.first_name || m.chat.title || m.chat.username || "" };
 }

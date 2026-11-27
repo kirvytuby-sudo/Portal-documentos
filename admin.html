@@ -15,7 +15,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Panel Docs">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link rel="stylesheet" href="estilos.css?v=12">
+<link rel="stylesheet" href="estilos.css?v=13">
 </head>
 <body>
 <main class="wrap wide">
@@ -151,7 +151,22 @@
     <!-- Usuarios (solo el dueño) -->
     <div id="tUsuarios" class="hidden">
       <details class="card" id="cfgAvisos">
-        <summary class="sum"><b>🔔 Avisos por correo y WhatsApp</b><span class="muted small"> — te avisan cuando un cliente sube algo, aunque el panel esté cerrado</span></summary>
+        <summary class="sum"><b>🔔 Avisos por Telegram, correo y WhatsApp</b><span class="muted small"> — te avisan cuando un cliente sube algo, aunque el panel esté cerrado</span></summary>
+        <div class="tg-box">
+          <label class="chk"><input type="checkbox" id="tgActivo"> <b>Telegram</b> <span class="muted small">(gratis y sin límite · recomendado)</span></label>
+          <ol class="small tg-pasos">
+            <li>En Telegram busca <b>@BotFather</b>, escríbele <code>/newbot</code> y sigue los pasos (nombre y usuario terminado en <i>bot</i>).</li>
+            <li>Copia el <b>token</b> que te da y pégalo aquí abajo.</li>
+            <li>Abre tu bot nuevo en Telegram y escríbele <code>/start</code>.</li>
+            <li>Pulsa <b>Detectar mi chat</b>, luego <b>Guardar</b> y <b>Enviar aviso de prueba</b>.</li>
+          </ol>
+          <div class="tg-campos">
+            <div><label class="lbl">Token del bot</label><input id="tgToken" class="mono" placeholder="123456789:AA…"></div>
+            <div><label class="lbl">Chat</label><input id="tgChat" class="mono" placeholder="Se llena solo"></div>
+            <button class="btn" id="bTgDetectar">Detectar mi chat</button>
+          </div>
+          <p class="muted small" style="margin-top:6px">Puedes agregar el bot a un grupo de Telegram con tu equipo: escribe algo en el grupo y pulsa Detectar para que los avisos lleguen a todos.</p>
+        </div>
         <div class="avisos-grid">
           <div>
             <label class="chk"><input type="checkbox" id="emActivo"> <b>Correo</b> <span class="muted small">(EmailJS, gratis hasta 200 al mes)</span></label>
@@ -247,7 +262,7 @@ import { firebaseConfig, ADMIN_EMAILS, DOMINIO_EMPRESAS, NOMBRE_DESPACHO, ALMACE
 import { iniciarActividad, cerrarActividad } from "./actividad.js";
 import { etiquetaPeriodo, periodoAnterior, checklistDe, opcionesTipo, estadoChecklist, opcionesPeriodoHTML, esOtros } from "./comun.js";
 import { iniciarPWA } from "./pwa.js";
-import { leerAvisos, enviarAvisos } from "./avisos.js";
+import { leerAvisos, enviarAvisos, detectarChatTelegram } from "./avisos.js";
 iniciarPWA(document.getElementById("bInstalar"));
 
 const app = initializeApp(firebaseConfig);
@@ -372,28 +387,39 @@ async function cargarCfgAvisos() {
   $("emActivo").checked = !!em.activo; $("emPara").value = em.para || ""; $("emService").value = em.serviceId || "";
   $("emTemplate").value = em.templateId || ""; $("emKey").value = em.publicKey || "";
   $("waActivo").checked = !!wa.activo; $("waTel").value = wa.telefono || ""; $("waKey").value = wa.apikey || "";
+  const tg = c.telegram || {};
+  $("tgActivo").checked = !!tg.activo; $("tgToken").value = tg.token || ""; $("tgChat").value = tg.chatId || "";
 }
+$("bTgDetectar").onclick = async () => {
+  const t = $("tgToken").value.trim(); if (!t) return msg("avMsg", "Pega primero el token del bot.", "err");
+  msg("avMsg", "Buscando tu chat…");
+  try { const c = await detectarChatTelegram(t); $("tgChat").value = c.id; $("tgActivo").checked = true;
+    msg("avMsg", `✓ Chat encontrado${c.nombre ? " (" + c.nombre + ")" : ""}. Ahora pulsa Guardar.`, "ok"); }
+  catch (e) { msg("avMsg", e.message, "err"); }
+};
 const cfgDeForm = () => ({
   email: { activo: $("emActivo").checked, para: $("emPara").value.trim(), serviceId: $("emService").value.trim(),
            templateId: $("emTemplate").value.trim(), publicKey: $("emKey").value.trim() },
-  whatsapp: { activo: $("waActivo").checked, telefono: $("waTel").value.replace(/[^\d+]/g, ""), apikey: $("waKey").value.trim() }
+  whatsapp: { activo: $("waActivo").checked, telefono: $("waTel").value.replace(/[^\d+]/g, ""), apikey: $("waKey").value.trim() },
+  telegram: { activo: $("tgActivo").checked, token: $("tgToken").value.trim(), chatId: $("tgChat").value.trim() }
 });
 $("bAvGuardar").onclick = async () => {
   const c = cfgDeForm();
   if (c.email.activo && !(c.email.para && c.email.serviceId && c.email.templateId && c.email.publicKey)) return msg("avMsg", "Para el correo llena los 4 campos.", "err");
   if (c.whatsapp.activo && !(c.whatsapp.telefono && c.whatsapp.apikey)) return msg("avMsg", "Para WhatsApp pon tu número y tu API key.", "err");
+  if (c.telegram.activo && !(c.telegram.token && c.telegram.chatId)) return msg("avMsg", "Para Telegram pon el token y pulsa Detectar mi chat.", "err");
   try { await setDoc(doc(db, "ajustes", "avisos"), c); msg("avMsg", "✓ Avisos guardados.", "ok"); }
   catch (e) { console.error(e); msg("avMsg", "No se pudo guardar: " + (e.code || e.message), "err"); }
 };
 $("bAvProbar").onclick = async () => {
   const c = cfgDeForm();
-  if (!c.email.activo && !c.whatsapp.activo) return msg("avMsg", "Activa correo o WhatsApp primero.", "err");
+  if (!c.email.activo && !c.whatsapp.activo && !c.telegram.activo) return msg("avMsg", "Activa Telegram, correo o WhatsApp primero.", "err");
   msg("avMsg", "Enviando prueba…");
   const r = await enviarAvisos(c, { empresa: "EMPRESA DE PRUEBA", cantidad: 2, archivos: ["estado_cuenta.pdf", "nomina.xlsx"],
     periodo: "Prueba", tipo: "Estados de cuenta", nota: "Este es un aviso de prueba" }, linkPanel());
   const err = r.filter(x => x.status === "rejected");
   msg("avMsg", err.length ? "Falló: " + err.map(x => x.reason?.message || x.reason).join(", ") + ". Revisa los datos."
-    : "✓ Prueba enviada. Revisa tu correo y/o WhatsApp en un minuto.", err.length ? "err" : "ok");
+    : "✓ Prueba enviada. Revisa Telegram, tu correo o WhatsApp.", err.length ? "err" : "ok");
 };
 
 // ---------- Usuarios (solo el dueño) ----------
