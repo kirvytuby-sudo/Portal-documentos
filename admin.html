@@ -22,7 +22,7 @@
   <section id="vLogin" class="card hidden" style="max-width:420px;margin:40px auto">
     <h2>Iniciar sesión</h2>
     <form id="fLogin">
-      <label class="lbl">Correo</label><input id="lCorreo" type="email" autocomplete="username" required>
+      <label class="lbl">Usuario o correo</label><input id="lCorreo" autocomplete="username" autocapitalize="none" spellcheck="false" required>
       <label class="lbl">Contraseña</label><input id="lPass" type="password" autocomplete="current-password" required>
       <button class="btn primary full">Entrar</button>
     </form>
@@ -95,7 +95,7 @@
         <p class="muted small" style="margin-bottom:6px">Tendrá acceso a este panel y verá todas las empresas y documentos.</p>
         <form id="fUsu" class="alta">
           <div><label class="lbl">Nombre *</label><input id="uNombre" required maxlength="80"></div>
-          <div><label class="lbl">Correo *</label><input id="uCorreo" type="email" required></div>
+          <div><label class="lbl">Usuario * <span class="small">(sin espacios)</span></label><input id="uCorreo" required maxlength="30" autocapitalize="none" spellcheck="false" placeholder="ej. luzmaria"></div>
           <div><label class="lbl">Contraseña inicial</label><input id="uPass" minlength="6" required class="mono"></div>
           <button class="btn primary" id="bUsu">Agregar</button>
         </form>
@@ -156,26 +156,34 @@ onAuthStateChanged(auth, async u => {
     $("vPanel").classList.add("hidden"); $("sesion").classList.add("hidden"); $("vLogin").classList.remove("hidden");
   }
 });
+// Usuarios sin correo: "luzmaria" → luzmaria@usuarios.example.com (interno)
+const DOMINIO_USUARIOS = "usuarios.example.com";
+const correoUsuario = u => u.includes("@") ? u.toLowerCase() : `${u.toLowerCase()}@${DOMINIO_USUARIOS}`;
+const nombreUsuario = c => c.endsWith("@" + DOMINIO_USUARIOS) ? c.split("@")[0] : c;
 $("bOlvide").onclick = async e => {
   e.preventDefault();
   const c = $("lCorreo").value.trim();
-  if (!c) return msg("loginMsg", "Escribe tu correo arriba y vuelve a dar clic aquí.", "err");
+  if (!c) return msg("loginMsg", "Escribe tu usuario o correo arriba y vuelve a dar clic aquí.", "err");
+  if (!c.includes("@")) return msg("loginMsg", "Pide al administrador que te asigne una contraseña nueva.", "err");
   try { await sendPasswordResetEmail(auth, c); } catch {}
   msg("loginMsg", "Si el correo está registrado, te llegará un enlace para cambiar tu contraseña (revisa spam).", "ok");
 };
 $("fLogin").onsubmit = async e => {
   e.preventDefault(); msg("loginMsg", "Entrando…");
-  try { await signInWithEmailAndPassword(auth, $("lCorreo").value.trim(), $("lPass").value); msg("loginMsg", ""); }
-  catch { msg("loginMsg", "Correo o contraseña incorrectos.", "err"); }
+  try { await signInWithEmailAndPassword(auth, correoUsuario($("lCorreo").value.trim()), $("lPass").value); msg("loginMsg", ""); }
+  catch { msg("loginMsg", "Usuario o contraseña incorrectos.", "err"); }
 };
 $("bSalir").onclick = () => signOut(auth);
 
 function iniciar(u) {
   $("vLogin").classList.add("hidden"); $("vPanel").classList.remove("hidden"); $("sesion").classList.remove("hidden");
-  $("yo").textContent = u.email;
+  $("yo").textContent = nombreUsuario(u.email);
   $("tabUsuarios").classList.toggle("hidden", !esDueno);
   if (esDueno) unsubs.push(onSnapshot(query(collection(db, "admins"), orderBy("nombre")), s => {
     usuarios = s.docs.map(d => ({ id: d.id, ...d.data() })); renderUsuarios();
+  }, errorGeneral));
+  if (esDueno) unsubs.push(onSnapshot(collection(db, "privadoUsu"), s => {
+    passUsu = new Map(s.docs.map(d => [d.id, d.data().pass])); renderUsuarios();
   }, errorGeneral));
   unsubs.push(onSnapshot(query(collection(db, "empresas"), orderBy("nombre")), s => {
     empresas = new Map(s.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
@@ -210,55 +218,81 @@ document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
 const irBandeja = empId => { $("fEmpresa").value = empId; $("fEstado").value = ""; cambiarEmpresa(); document.querySelector('[data-tab="tBandeja"]').click(); };
 
 // ---------- Usuarios (solo el dueño) ----------
-let usuarios = [];
-const genPass = () => Array.from(crypto.getRandomValues(new Uint8Array(10)), x => "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"[x % 55]).join("");
+let usuarios = [], passUsu = new Map(), passVisible = new Set();
+const genPass = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), x => "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"[x % 55]).join("");
 $("uPass").value = genPass();
 const linkPanel = () => new URL("admin.html", location.href).href;
+const textoUsu = (u, p) => `Acceso al Portal de Documentos:\n${linkPanel()}\nUsuario: ${nombreUsuario(u)}\nContraseña: ${p}`;
 function renderUsuarios() {
   const filaDueno = duenos.map(c => `<div class="item"><div class="info"><div class="nm">${esc(c)} <span class="tag ok">Dueño</span></div>
     <div class="muted small">Acceso total · administra usuarios</div></div></div>`).join("");
-  $("listaUsu").innerHTML = filaDueno + (usuarios.length ? usuarios.map(u => `
-    <div class="item">
+  $("listaUsu").innerHTML = filaDueno + (usuarios.length ? usuarios.map(u => {
+    const p = passUsu.get(u.id), ver = passVisible.has(u.id);
+    return `<div class="item">
       <div class="info"><div class="nm">${esc(u.nombre)}</div>
-        <div class="muted small">${esc(u.id)} · agregado ${fmt(u.creado?.toDate?.())}</div></div>
+        <div class="muted small">Usuario: <b class="mono">${esc(nombreUsuario(u.id))}</b> · agregado ${fmt(u.creado?.toDate?.())}</div>
+        ${p ? `<div class="small">Contraseña: <span class="mono">${ver ? esc(p) : "••••••••"}</span> <button class="x" data-act="ver" data-id="${esc(u.id)}">${ver ? "🙈" : "👁"}</button></div>` : ""}
+      </div>
       <div class="acciones">
-        <button class="btn sm" data-act="reset" data-id="${esc(u.id)}">Enviar cambio de contraseña</button>
+        ${p ? `<button class="btn sm" data-act="copiar" data-id="${esc(u.id)}">Copiar acceso</button>` : ""}
+        <button class="btn sm" data-act="nueva" data-id="${esc(u.id)}">Nueva contraseña</button>
         <button class="btn sm danger" data-act="quitar" data-id="${esc(u.id)}">Quitar acceso</button>
       </div>
-    </div>`).join("") : '<div class="card muted" style="text-align:center">Aún no has agregado usuarios.</div>');
+    </div>`;
+  }).join("") : '<div class="card muted" style="text-align:center">Aún no has agregado usuarios.</div>');
+}
+// Cambia la contraseña de una cuenta conociendo la anterior (guardada solo para el dueño)
+async function cambiarPass(correo, vieja, nueva) {
+  const cred = await signInWithEmailAndPassword(auth2, correo, vieja);
+  await updatePassword(cred.user, nueva); await signOut(auth2);
 }
 $("fUsu").onsubmit = async ev => {
   ev.preventDefault();
-  const nombre = $("uNombre").value.trim(), correo = $("uCorreo").value.trim().toLowerCase(), pass = $("uPass").value;
-  if (duenos.includes(correo) || correo.endsWith("@" + DOMINIO_EMPRESAS)) return msg("usuMsg", "Ese correo no se puede agregar.", "err");
+  const nombre = $("uNombre").value.trim(), usuario = $("uCorreo").value.trim().toLowerCase(), pass = $("uPass").value;
+  if (!/^[a-z0-9._-]{3,30}$/.test(usuario)) return msg("usuMsg", "El usuario debe tener de 3 a 30 letras o números, sin espacios ni acentos.", "err");
+  if (pass.length < 6) return msg("usuMsg", "La contraseña debe tener al menos 6 caracteres.", "err");
+  const correo = correoUsuario(usuario);
+  if (usuarios.some(u => u.id === correo)) return msg("usuMsg", "Ese usuario ya existe.", "err");
   $("bUsu").disabled = true; msg("usuMsg", "Creando…");
-  let nueva = true;
   try {
     try { await createUserWithEmailAndPassword(auth2, correo, pass); await signOut(auth2); }
-    catch (err) { if (err.code === "auth/email-already-in-use") nueva = false; else throw err; }
+    catch (err) {
+      if (err.code !== "auth/email-already-in-use") throw err;
+      const vieja = passUsu.get(correo);
+      if (!vieja) throw new Error("Ese nombre de usuario ya está ocupado. Elige otro.");
+      await cambiarPass(correo, vieja, pass); // se le había quitado el acceso: se reactiva
+    }
+    await setDoc(doc(db, "privadoUsu", correo), { pass });
     await setDoc(doc(db, "admins", correo), { nombre, creado: serverTimestamp() });
-    const txt = nueva
-      ? `Acceso al Portal de Documentos:\n${linkPanel()}\nCorreo: ${correo}\nContraseña: ${pass}`
-      : `Acceso al Portal de Documentos:\n${linkPanel()}\nCorreo: ${correo}\n(usa la contraseña que ya tenías)`;
-    try { await navigator.clipboard.writeText(txt); } catch {}
-    msg("usuMsg", nueva
-      ? `✓ ${nombre} agregado. Contraseña: ${pass} — los datos de acceso se copiaron para que se los envíes.`
-      : `✓ ${nombre} ya tenía cuenta; se le dio acceso con su contraseña actual. Datos copiados.`, "ok");
+    try { await navigator.clipboard.writeText(textoUsu(correo, pass)); } catch {}
+    msg("usuMsg", `✓ ${nombre} agregado. Usuario: ${usuario} · Contraseña: ${pass} — los datos de acceso se copiaron para que se los envíes.`, "ok");
     $("fUsu").reset(); $("uPass").value = genPass();
   } catch (err) {
     console.error(err);
-    msg("usuMsg", err.code === "auth/invalid-email" ? "Correo no válido." : err.code === "auth/weak-password" ? "La contraseña debe tener al menos 6 caracteres." : "No se pudo agregar: " + (err.code || err.message), "err");
+    msg("usuMsg", err.code === "auth/weak-password" ? "La contraseña debe tener al menos 6 caracteres." : "No se pudo agregar: " + (err.message || err.code), "err");
   } finally { $("bUsu").disabled = false; }
 };
 $("listaUsu").onclick = async ev => {
   const b = ev.target.closest("button[data-act]"); if (!b) return;
   const u = usuarios.find(x => x.id === b.dataset.id); if (!u) return;
-  if (b.dataset.act === "reset") {
-    try { await sendPasswordResetEmail(auth, u.id); toast(`Se envió el correo a ${u.id}`); }
-    catch (err) { toast("No se pudo enviar: " + err.code); }
+  const act = b.dataset.act;
+  if (act === "ver") { passVisible.has(u.id) ? passVisible.delete(u.id) : passVisible.add(u.id); renderUsuarios(); }
+  if (act === "copiar") { await navigator.clipboard.writeText(textoUsu(u.id, passUsu.get(u.id))); toast("Datos de acceso copiados"); }
+  if (act === "nueva") {
+    const vieja = passUsu.get(u.id);
+    if (!vieja) return toast("Este usuario se creó con correo: usa “¿Olvidaste tu contraseña?” en el inicio de sesión.");
+    if (!confirm(`¿Generar una contraseña nueva para ${u.nombre}? La anterior dejará de funcionar.`)) return;
+    const nueva = genPass();
+    try {
+      await cambiarPass(u.id, vieja, nueva);
+      await setDoc(doc(db, "privadoUsu", u.id), { pass: nueva });
+      passVisible.add(u.id);
+      try { await navigator.clipboard.writeText(textoUsu(u.id, nueva)); } catch {}
+      toast(`Contraseña nueva: ${nueva} (copiada)`);
+    } catch (err) { console.error(err); toast("No se pudo cambiar: " + err.code); }
   }
-  if (b.dataset.act === "quitar") {
-    if (!confirm(`¿Quitar el acceso de ${u.nombre} (${u.id})? Ya no podrá entrar al panel.`)) return;
+  if (act === "quitar") {
+    if (!confirm(`¿Quitar el acceso de ${u.nombre}? Ya no podrá entrar al panel.`)) return;
     await deleteDoc(doc(db, "admins", u.id)); toast("Acceso quitado");
   }
 };

@@ -56,6 +56,11 @@ service cloud.firestore {
       allow write: if isOwner();
     }
 
+    // Contraseñas de usuarios del panel: solo el dueño
+    match /privadoUsu/{correo} {
+      allow read, write: if isOwner();
+    }
+
     // PINs: solo administradores
     match /privado/{id} {
       allow read, write: if isAdmin();
