@@ -15,8 +15,8 @@ service firebase.storage {
     // Cada empresa solo puede subir y ver su propia carpeta
     match /empresas/{id}/{archivo} {
       allow read: if isAdmin() || isEmpresa(id);
-      allow create: if isEmpresa(id)
-        && firestore.get(/databases/(default)/documents/empresas/$(id)).data.activo == true
+      allow create: if (isAdmin() || isEmpresa(id))
+        && (isAdmin() || firestore.get(/databases/(default)/documents/empresas/$(id)).data.activo == true)
         && request.resource.size < 25 * 1024 * 1024
         && request.resource.contentType.matches('(image/.*|application/pdf|text/xml|application/xml|text/csv|application/zip|application/x-zip-compressed|application/msword|application/vnd[.].*)');
       allow delete: if isAdmin();

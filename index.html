@@ -9,7 +9,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="google" content="notranslate">
-<link rel="stylesheet" href="estilos.css?v=9">
+<link rel="stylesheet" href="estilos.css?v=10">
 </head>
 <body>
 <main class="wrap">
@@ -132,8 +132,8 @@ async function entrar() {
   unsub = onSnapshot(
     query(collection(db, "empresas", empId, "archivos"), orderBy("fecha", "desc"), limit(100)),
     snap => {
-      $("lista").innerHTML = snap.empty ? '<p class="muted small">Aún no has enviado documentos.</p>' :
-        snap.docs.map(d => {
+      $("lista").innerHTML = !snap.docs.some(d => d.data().origen !== "despacho") ? '<p class="muted small">Aún no has enviado documentos.</p>' :
+        snap.docs.filter(d => d.data().origen !== "despacho").map(d => {
           const a = d.data(), f = a.fecha?.toDate?.();
           return `<div class="item">
             <div class="ico">${esc(ext(a.nombre))}</div>

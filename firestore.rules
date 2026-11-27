@@ -29,19 +29,23 @@ service cloud.firestore {
       // Registro de cada archivo subido
       match /archivos/{archivoId} {
         allow read: if isAdmin() || (isEmpresa(id) && activa(id));
-        allow create: if isEmpresa(id) && activa(id)
+        allow create: if (isAdmin()
+          && request.resource.data.keys().hasOnly(['nombre','ruta','url','tipo','tamano','nota','fecha','revisado','empresaId','almacen','partes','origen','subidoPor'])
+          && request.resource.data.empresaId == id
+          && request.resource.data.subidoPor == request.auth.token.email)
+          || (isEmpresa(id) && activa(id)
           && request.resource.data.keys().hasOnly(['nombre','ruta','url','tipo','tamano','nota','fecha','revisado','empresaId','almacen','partes'])
           && request.resource.data.empresaId == id
           && request.resource.data.revisado == false
           && request.resource.data.fecha == request.time
           && (!('ruta' in request.resource.data) || request.resource.data.ruta.matches('empresas/' + id + '/.*'))
-          && request.resource.data.nota.size() <= 300;
+          && request.resource.data.nota.size() <= 300);
         allow update, delete: if isAdmin();
 
         // Modo gratis: el contenido del archivo, en partes
         match /partes/{n} {
           allow read: if isAdmin() || (isEmpresa(id) && activa(id));
-          allow create: if isEmpresa(id) && activa(id)
+          allow create: if (isAdmin() || (isEmpresa(id) && activa(id)))
             && request.resource.data.keys().hasOnly(['d'])
             && request.resource.data.d is string
             && request.resource.data.d.size() <= 820000;

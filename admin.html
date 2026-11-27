@@ -9,7 +9,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="google" content="notranslate">
-<link rel="stylesheet" href="estilos.css?v=9">
+<link rel="stylesheet" href="estilos.css?v=10">
 </head>
 <body>
 <main class="wrap wide">
@@ -66,6 +66,19 @@
           <input id="fTexto" placeholder="Buscar por nombre de archivo o nota">
           <button class="btn" id="bRevTodo">✓ Marcar todos como revisados</button>
         </div>
+        <details class="card subir-box" id="subirBox">
+          <summary><b>⬆ Subir documentos a esta empresa</b><span class="muted small"> — se guardan en su espacio</span></summary>
+          <label id="aDrop" class="drop" style="margin-top:12px">
+            <input type="file" id="aArchivos" multiple accept="image/*,application/pdf,.pdf,.xml,.csv,.xls,.xlsx,.doc,.docx,.zip">
+            <div class="drop-icon">⬆</div>
+            <strong>Elige archivos o arrástralos aquí</strong>
+            <span class="muted small">PDF, fotos, XML, Excel, Word, ZIP · máx. <span id="aMaxMb"></span> MB c/u</span>
+          </label>
+          <div id="aCola" class="cola"></div>
+          <textarea id="aNota" rows="2" maxlength="300" placeholder="Nota opcional (ej. declaración de octubre)"></textarea>
+          <button id="aSubir" class="btn primary full" disabled>Subir documentos</button>
+          <p id="aMsg" class="msg"></p>
+        </details>
         <div id="listaArch" class="lista"></div>
       </div>
     </div>
@@ -127,8 +140,8 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, updatePassword, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
-import { firebaseConfig, ADMIN_EMAILS, DOMINIO_EMPRESAS, NOMBRE_DESPACHO } from "./config.js";
+import { getStorage, ref, deleteObject, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+import { firebaseConfig, ADMIN_EMAILS, DOMINIO_EMPRESAS, NOMBRE_DESPACHO, ALMACENAMIENTO, MAX_MB } from "./config.js";
 import { iniciarActividad, cerrarActividad } from "./actividad.js";
 
 const app = initializeApp(firebaseConfig);
@@ -395,7 +408,7 @@ function stats() {
 function llenarSelect() {
   if ($("fEmpresa").value && !empresas.has($("fEmpresa").value)) verEmpresa("");
 }
-function verEmpresa(id) { $("fEmpresa").value = id; $("fTexto").value = ""; cambiarEmpresa(); window.scrollTo(0, 0); }
+function verEmpresa(id) { if (aSubiendo) return toast("Espera a que termine la subida."); aCola = []; aPintar(); msg("aMsg", ""); $("fEmpresa").value = id; $("fTexto").value = ""; cambiarEmpresa(); window.scrollTo(0, 0); }
 function cambiarEmpresa() {
   unsubEmp?.(); unsubEmp = null; filtrados = null;
   const id = $("fEmpresa").value;
@@ -453,6 +466,99 @@ function renderDetalle(emp) {
   $("listaArch").innerHTML = vistos.length ? vistos.map(filaArchivo).join("")
     : `<div class="card muted" style="text-align:center">${est === "pend" ? "🎉 No hay documentos pendientes." : "Sin documentos."}</div>`;
 }
+// ---------- Subir documentos desde el panel ----------
+const TIPOS = { pdf:"application/pdf", xml:"text/xml", csv:"text/csv", xls:"application/vnd.ms-excel",
+  xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", doc:"application/msword",
+  docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document", zip:"application/zip",
+  jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", heic:"image/heic", heif:"image/heif", webp:"image/webp" };
+const PERMITIDO = /^(image\/.*|application\/pdf|text\/xml|application\/xml|text\/csv|application\/zip|application\/x-zip-compressed|application\/msword|application\/vnd\..*)$/;
+const tipoDe = f => f.type || TIPOS[ext(f.name)] || "application/octet-stream";
+const rnd = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), x => x.toString(16).padStart(2, "0")).join("");
+let aCola = [], aSec = 0, aSubiendo = false;
+$("aMaxMb").textContent = MAX_MB;
+function aAgregar(files) {
+  const rech = [];
+  for (const f of files) {
+    const comprimible = /^image\/(jpeg|png|webp)$/.test(f.type) && f.size <= 40 * 1048576;
+    if (f.size > MAX_MB * 1048576 && !comprimible) { rech.push(`${f.name} (más de ${MAX_MB} MB)`); continue; }
+    if (!PERMITIDO.test(tipoDe(f))) { rech.push(`${f.name} (tipo no permitido)`); continue; }
+    aCola.push({ id: ++aSec, file: f, pct: 0, estado: "listo" });
+  }
+  msg("aMsg", rech.length ? "No se agregaron: " + rech.join(", ") : "", rech.length ? "err" : "");
+  aPintar();
+}
+function aPintar() {
+  $("aCola").innerHTML = aCola.map(it => `
+    <div class="item" id="aq${it.id}">
+      <div class="ico">${esc(ext(it.file.name))}</div>
+      <div class="info"><div class="nm">${esc(it.file.name)}</div>
+        <div class="muted small">${tam(it.file.size)}${it.estado === "error" ? ' · <span style="color:var(--err)">Error, reintenta</span>' : ""}</div>
+        <div class="bar"><i style="width:${it.pct}%"></i></div></div>
+      ${aSubiendo ? "" : `<button class="x" data-q="${it.id}" title="Quitar">×</button>`}
+    </div>`).join("");
+  $("aSubir").disabled = aSubiendo || !aCola.length;
+  $("aSubir").textContent = aCola.length ? `Subir ${aCola.length} documento${aCola.length > 1 ? "s" : ""}` : "Subir documentos";
+}
+$("aCola").onclick = e => { const id = +e.target.dataset.q; if (id) { aCola = aCola.filter(x => x.id !== id); aPintar(); } };
+$("aArchivos").onchange = e => { aAgregar(e.target.files); e.target.value = ""; };
+["dragenter","dragover"].forEach(ev => $("aDrop").addEventListener(ev, e => { e.preventDefault(); $("aDrop").classList.add("over"); }));
+["dragleave","drop"].forEach(ev => $("aDrop").addEventListener(ev, e => { e.preventDefault(); $("aDrop").classList.remove("over"); }));
+$("aDrop").addEventListener("drop", e => aAgregar(e.dataTransfer.files));
+const aProgreso = (it, pct) => { it.pct = pct; const b = document.querySelector(`#aq${it.id} .bar i`); if (b) b.style.width = pct + "%"; };
+async function preparar(f) {
+  const original = { blob: f, nombre: f.name, tipo: tipoDe(f) };
+  if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return original;
+  try {
+    const img = await createImageBitmap(f);
+    const k = Math.min(1, 2000 / Math.max(img.width, img.height));
+    const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.82));
+    if (!blob || blob.size >= f.size) return original;
+    return { blob, nombre: f.name.replace(/\.[^.]+$/, "") + ".jpg", tipo: "image/jpeg" };
+  } catch { return original; }
+}
+const PARTE = 600000;
+const aB64 = u8 => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+async function subirAEmpresa(empId, it, nota) {
+  const p = await preparar(it.file);
+  if (p.blob.size > MAX_MB * 1048576) throw new Error("Archivo muy grande");
+  const base = { nombre: p.nombre.slice(0, 200), tipo: p.tipo, nota, fecha: serverTimestamp(), revisado: true,
+    empresaId: empId, origen: "despacho", subidoPor: (auth.currentUser?.email || "").toLowerCase() };
+  if (ALMACENAMIENTO === "storage") {
+    const limpio = p.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w.\-]+/g, "_").slice(-80);
+    const ruta = `empresas/${empId}/${Date.now()}_${rnd(3)}_${limpio}`;
+    const task = uploadBytesResumable(ref(storage(), ruta), p.blob, { contentType: p.tipo });
+    await new Promise((ok, mal) => task.on("state_changed", s => aProgreso(it, s.bytesTransferred / s.totalBytes * 100), mal, ok));
+    const url = await getDownloadURL(task.snapshot.ref);
+    await setDoc(doc(collection(db, "empresas", empId, "archivos")), { ...base, ruta, url, tamano: p.blob.size, almacen: "st" });
+  } else {
+    const bytes = new Uint8Array(await p.blob.arrayBuffer());
+    const n = Math.max(1, Math.ceil(bytes.length / PARTE));
+    const aRef = doc(collection(db, "empresas", empId, "archivos"));
+    for (let i = 0; i < n; i++) {
+      await setDoc(doc(aRef, "partes", String(i)), { d: aB64(bytes.subarray(i * PARTE, (i + 1) * PARTE)) });
+      aProgreso(it, (i + 1) / n * 100);
+    }
+    await setDoc(aRef, { ...base, tamano: bytes.length, almacen: "fs", partes: n });
+  }
+}
+$("aSubir").onclick = async () => {
+  const empId = $("fEmpresa").value;
+  if (!aCola.length || !empId) return;
+  aSubiendo = true; aPintar(); msg("aMsg", "Subiendo…");
+  const nota = $("aNota").value.trim().slice(0, 300);
+  let ok = 0, fallos = 0;
+  for (const it of aCola) {
+    try { await subirAEmpresa(empId, it, nota); it.estado = "ok"; ok++; }
+    catch (e) { console.error(e); it.estado = "error"; it.pct = 0; fallos++; }
+  }
+  aCola = aCola.filter(x => x.estado !== "ok");
+  aSubiendo = false; aPintar();
+  if (!fallos) { $("aNota").value = ""; msg("aMsg", `✓ ${ok} documento${ok > 1 ? "s subidos" : " subido"} a ${empresas.get(empId)?.nombre || "la empresa"}.`, "ok"); }
+  else msg("aMsg", `${ok} subidos, ${fallos} con error. Vuelve a intentar.`, "err");
+};
+
 function filaArchivo(a) {
   {
     const img = a.url && (a.tipo || "").startsWith("image/") && !/hei[cf]/.test(a.tipo);
@@ -463,7 +569,7 @@ function filaArchivo(a) {
       <div class="ico">${img ? `<img loading="lazy" src="${esc(a.url)}" alt="">` : esc(ext(a.nombre))}</div>
       <div class="info">
         <div class="nm">${esc(a.nombre)}</div>
-        <div class="muted small">${fmt(a.fecha?.toDate?.())} · ${tam(a.tamano)}</div>
+        <div class="muted small">${fmt(a.fecha?.toDate?.())} · ${tam(a.tamano)}${a.origen === "despacho" ? ` · <span class="tag azul">Subido por ${esc(nombreUsuario(a.subidoPor || ""))}</span>` : ""}</div>
         ${a.nota ? `<div class="small nota">“${esc(a.nota)}”</div>` : ""}
       </div>
       <span class="tag ${a.revisado ? "ok" : "warn"}">${a.revisado ? "Revisado" : "Pendiente"}</span>
