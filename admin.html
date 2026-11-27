@@ -9,13 +9,21 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="google" content="notranslate">
-<link rel="stylesheet" href="estilos.css?v=10">
+<link rel="manifest" href="manifest-panel.webmanifest">
+<meta name="theme-color" content="#1d4ed8">
+<link rel="stylesheet" href="estilos.css?v=11">
 </head>
 <body>
 <main class="wrap wide">
   <header class="brand row between">
     <div class="row"><img class="logo" src="logo.svg?v=1" alt=""><div><h1 id="titulo">Portal de Documentos</h1><p class="muted small">Panel de administrador</p></div></div>
-    <div class="row hidden" id="sesion"><span class="muted small" id="yo"></span><button class="btn ghost sm" id="bSalir">Salir</button></div>
+    <div class="row">
+      <button class="btn ghost sm hidden" id="bInstalar">📲 Instalar app</button>
+      <div class="row hidden" id="sesion">
+        <button class="btn ghost sm" id="bNotif" title="Avisos de documentos nuevos">🔕 Avisos</button>
+        <span class="muted small" id="yo"></span><button class="btn ghost sm" id="bSalir">Salir</button>
+      </div>
+    </div>
   </header>
 
   <!-- Login -->
@@ -51,7 +59,10 @@
       <div id="indiceMsg" class="aviso hidden"></div>
       <!-- Vista 1: todas las empresas -->
       <div id="vEmpresasB">
-        <input id="bBuscarEmp" placeholder="Buscar empresa por nombre o RFC" style="margin-bottom:12px">
+        <div class="filtros-emp">
+          <input id="bBuscarEmp" placeholder="Buscar empresa por nombre o RFC">
+          <label class="per-lbl">📋 Checklist de <select id="bPeriodo"></select></label>
+        </div>
         <div id="gridEmp" class="lista"><p class="muted small">Cargando…</p></div>
       </div>
       <!-- Vista 2: documentos de una empresa -->
@@ -60,11 +71,15 @@
           <button class="btn" id="bVolver">← Todas las empresas</button>
           <div class="info"><h2 id="detNombre"></h2><p class="muted small" id="detInfo"></p></div>
         </div>
+        <div id="detChecklist" class="card ck-card hidden"></div>
         <div class="filtros det">
           <input type="hidden" id="fEmpresa" value="">
-          <select id="fEstado"><option value="">Todos</option><option value="pend">Pendientes</option><option value="rev">Revisados</option></select>
-          <input id="fTexto" placeholder="Buscar por nombre de archivo o nota">
-          <button class="btn" id="bRevTodo">✓ Marcar todos como revisados</button>
+          <select id="fPeriodo"></select>
+          <select id="fTipo"></select>
+          <select id="fEstado"><option value="">Todos los estados</option><option value="pend">Pendientes</option><option value="rev">Revisados</option></select>
+          <input id="fTexto" placeholder="Buscar por nombre o nota">
+          <button class="btn" id="bZip" title="Descargar lo que se ve en la lista">⬇ ZIP</button>
+          <button class="btn" id="bRevTodo">✓ Revisar todos</button>
         </div>
         <details class="card subir-box" id="subirBox">
           <summary><b>⬆ Subir documentos a esta empresa</b><span class="muted small"> — se guardan en su espacio</span></summary>
@@ -75,6 +90,10 @@
             <span class="muted small">PDF, fotos, XML, Excel, Word, ZIP · máx. <span id="aMaxMb"></span> MB c/u</span>
           </label>
           <div id="aCola" class="cola"></div>
+          <div class="sel-doble">
+            <label><span class="lbl">Periodo</span><select id="aPeriodo"></select></label>
+            <label><span class="lbl">¿Qué documento es?</span><select id="aTipo"></select></label>
+          </div>
           <textarea id="aNota" rows="2" maxlength="300" placeholder="Nota opcional (ej. declaración de octubre)"></textarea>
           <button id="aSubir" class="btn primary full" disabled>Subir documentos</button>
           <p id="aMsg" class="msg"></p>
@@ -95,6 +114,13 @@
         </form>
         <p id="altaMsg" class="msg"></p>
       </div>
+      <details class="card">
+        <summary class="sum"><b>📋 Checklist general</b><span class="muted small"> — lo que se pide a las empresas que no tienen uno propio</span></summary>
+        <p class="muted small" style="margin:10px 0 6px">Escribe un documento por renglón. "Otros" siempre aparece como opción y no cuenta como faltante.</p>
+        <textarea id="cGeneral" rows="6"></textarea>
+        <button class="btn primary" id="bGeneral" style="margin-top:10px">Guardar checklist general</button>
+        <p id="cGenMsg" class="msg"></p>
+      </details>
       <div class="row" style="margin-bottom:10px">
         <input id="eBuscar" class="grow" placeholder="Buscar empresa por nombre o RFC" style="flex:1">
         <select id="eEstado" style="width:auto"><option value="">Todas</option><option value="act">Activas</option><option value="inact">Inactivas</option><option value="pend">Con pendientes</option></select>
@@ -136,6 +162,38 @@
 </main>
 <div id="toast" class="toast hidden"></div>
 
+<!-- Vista previa -->
+<div id="visor" class="visor hidden">
+  <div class="visor-caja">
+    <div class="visor-top">
+      <div class="info"><div class="nm" id="vNombre"></div><div class="muted small" id="vInfo"></div></div>
+      <div class="acciones">
+        <button class="btn sm" id="vPrev" title="Anterior (←)">‹</button>
+        <span class="small muted" id="vPos"></span>
+        <button class="btn sm" id="vNext" title="Siguiente (→)">›</button>
+        <button class="btn sm" id="vRev"></button>
+        <button class="btn sm" id="vDesc">⬇ Descargar</button>
+        <button class="btn sm" id="vCerrar" title="Cerrar (Esc)">✕</button>
+      </div>
+    </div>
+    <div class="visor-cuerpo" id="vCuerpo"></div>
+  </div>
+</div>
+
+<!-- Checklist de una empresa -->
+<div id="modalCk" class="visor hidden">
+  <div class="visor-caja chica">
+    <h3 id="ckTitulo" style="margin-bottom:6px"></h3>
+    <p class="muted small">Un documento por renglón. Déjalo vacío para usar el checklist general.</p>
+    <textarea id="ckTexto" rows="8"></textarea>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button class="btn" id="ckGeneral">Usar el general</button>
+      <button class="btn" id="ckCancelar">Cancelar</button>
+      <button class="btn primary" id="ckGuardar">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, updatePassword, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -143,6 +201,9 @@ import { getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc
 import { getStorage, ref, deleteObject, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { firebaseConfig, ADMIN_EMAILS, DOMINIO_EMPRESAS, NOMBRE_DESPACHO, ALMACENAMIENTO, MAX_MB } from "./config.js";
 import { iniciarActividad, cerrarActividad } from "./actividad.js";
+import { etiquetaPeriodo, periodoAnterior, checklistDe, opcionesTipo, estadoChecklist, opcionesPeriodoHTML, esOtros } from "./comun.js";
+import { iniciarPWA } from "./pwa.js";
+iniciarPWA(document.getElementById("bInstalar"));
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app), db = getFirestore(app);
@@ -225,6 +286,11 @@ function iniciar(u) {
     empresas = new Map(s.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
     llenarSelect(); todoRender();
   }, errorGeneral));
+  unsubs.push(onSnapshot(doc(db, "ajustes", "general"), s => {
+    checklistGeneral = s.data()?.checklist || [];
+    if (document.activeElement !== $("cGeneral")) $("cGeneral").value = checklistDe(null, checklistGeneral).join("\n");
+    todoRender();
+  }, () => {}));
   unsubs.push(onSnapshot(collection(db, "privado"), s => {
     pins = new Map(s.docs.map(d => [d.id, d.data().pin])); renderEmpresas();
   }, errorGeneral));
@@ -232,6 +298,7 @@ function iniciar(u) {
   unsubs.push(onSnapshot(query(collectionGroup(db, "archivos"), orderBy("fecha", "desc"), limit(1000)), s => {
     $("indiceMsg").classList.add("hidden");
     todos = s.docs.map(d => ({ path: d.ref.path, ...d.data() })); todoRender();
+    avisarNuevos(s);
   }, errorIndice));
 }
 function errorGeneral(e) { console.error(e); toast("Error de permisos: revisa tu correo en las reglas."); }
@@ -251,7 +318,7 @@ document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
   ["tBandeja","tEmpresas","tUsuarios","tActividad"].forEach(t => $(t).classList.toggle("hidden", t !== b.dataset.tab));
 });
-const irBandeja = empId => { $("fEmpresa").value = empId; $("fEstado").value = ""; cambiarEmpresa(); document.querySelector('[data-tab="tBandeja"]').click(); };
+const irBandeja = empId => { $("fEstado").value = ""; verEmpresa(empId); document.querySelector('[data-tab="tBandeja"]').click(); };
 
 // ---------- Usuarios (solo el dueño) ----------
 let usuarios = [], passUsu = new Map(), passVisible = new Set();
@@ -405,10 +472,20 @@ function stats() {
 }
 
 // ---------- Bandeja ----------
+let checklistGeneral = [];
+const ckDe = e => checklistDe(e, checklistGeneral);
+$("bPeriodo").innerHTML = opcionesPeriodoHTML(periodoAnterior());
+$("bPeriodo").onchange = renderArchivos;
+$("aPeriodo").innerHTML = opcionesPeriodoHTML(periodoAnterior());
 function llenarSelect() {
   if ($("fEmpresa").value && !empresas.has($("fEmpresa").value)) verEmpresa("");
 }
-function verEmpresa(id) { if (aSubiendo) return toast("Espera a que termine la subida."); aCola = []; aPintar(); msg("aMsg", ""); $("fEmpresa").value = id; $("fTexto").value = ""; cambiarEmpresa(); window.scrollTo(0, 0); }
+function verEmpresa(id) {
+  if (aSubiendo) return toast("Espera a que termine la subida."); aCola = []; aPintar(); msg("aMsg", "");
+  $("fEmpresa").value = id; $("fTexto").value = ""; $("fTipo").value = "";
+  if (id) { $("fPeriodo").innerHTML = opcionesPeriodoHTML($("bPeriodo").value, true); $("aPeriodo").value = $("bPeriodo").value; }
+  cambiarEmpresa(); window.scrollTo(0, 0);
+}
 function cambiarEmpresa() {
   unsubEmp?.(); unsubEmp = null; filtrados = null;
   const id = $("fEmpresa").value;
@@ -423,28 +500,36 @@ function cambiarEmpresa() {
 $("bVolver").onclick = () => verEmpresa("");
 $("bBuscarEmp").oninput = renderArchivos;
 $("fEstado").onchange = renderArchivos;
+$("fPeriodo").onchange = renderArchivos;
+$("fTipo").onchange = renderArchivos;
 $("fTexto").oninput = renderArchivos;
 $("gridEmp").onclick = e => { const c = e.target.closest("[data-ver]"); if (c) verEmpresa(c.dataset.ver); };
 
 function renderArchivos() { return $("fEmpresa").value ? renderDetalle($("fEmpresa").value) : renderGrid(); }
 
-// Vista 1: tarjeta por empresa
+// Vista 1: renglón por empresa
 function renderGrid() {
-  const txt = $("bBuscarEmp").value.trim().toLowerCase();
-  const st = {};
-  todos.forEach(a => { const s = st[a.empresaId] ??= { tot: 0, pend: 0, ult: null }; s.tot++; if (!a.revisado) s.pend++; if (!s.ult) s.ult = a.fecha?.toDate?.(); });
-  const lista = [...empresas.values()]
-    .filter(e => !txt || (e.nombre + " " + (e.rfc || "")).toLowerCase().includes(txt))
-    .sort((x, y) => ((st[y.id]?.pend || 0) > 0) - ((st[x.id]?.pend || 0) > 0) || x.nombre.localeCompare(y.nombre, "es"));
+  const txt = $("bBuscarEmp").value.trim().toLowerCase(), per = $("bPeriodo").value;
+  const st = {}, porEmp = {};
+  todos.forEach(a => {
+    const s = st[a.empresaId] ??= { tot: 0, pend: 0, ult: null }; s.tot++; if (!a.revisado) s.pend++; if (!s.ult) s.ult = a.fecha?.toDate?.();
+    (porEmp[a.empresaId] ??= []).push(a);
+  });
+  const lista = [...empresas.values()].filter(e => !txt || (e.nombre + " " + (e.rfc || "")).toLowerCase().includes(txt));
+  lista.forEach(e => { const c = estadoChecklist(ckDe(e), porEmp[e.id] || [], per); e._ck = { ok: c.filter(x => x.ok).length, tot: c.length, faltan: c.filter(x => !x.ok).map(x => x.item) }; });
+  lista.sort((x, y) => ((st[y.id]?.pend || 0) > 0) - ((st[x.id]?.pend || 0) > 0)
+    || ((x._ck.ok < x._ck.tot) - (y._ck.ok < y._ck.tot)) * -1 || x.nombre.localeCompare(y.nombre, "es"));
   if (!lista.length) { $("gridEmp").innerHTML = `<div class="card muted" style="text-align:center;">${empresas.size ? "Ninguna empresa coincide." : "Aún no tienes empresas. Agrégalas en la pestaña Empresas."}</div>`; return; }
   $("gridEmp").innerHTML = lista.map(e => {
-    const s = st[e.id] || { tot: 0, pend: 0, ult: null };
+    const s = st[e.id] || { tot: 0, pend: 0, ult: null }, ck = e._ck, completo = ck.tot && ck.ok === ck.tot;
     return `<div class="item emp-row ${s.pend ? "nuevo" : ""}" data-ver="${esc(e.id)}">
       <div class="info">
         <div class="nm">${esc(e.nombre)} ${e.activo ? "" : '<span class="tag off">Inactiva</span>'}</div>
         <div class="muted small">${esc(e.rfc || "Sin RFC")} · ${s.tot} documento${s.tot === 1 ? "" : "s"}${s.ult ? " · último: " + fmt(s.ult) : ""}</div>
+        ${ck.faltan.length && ck.faltan.length < ck.tot ? `<div class="small falta-txt">Falta: ${esc(ck.faltan.join(", "))}</div>` : ""}
       </div>
-      ${s.pend ? `<span class="tag warn">${s.pend} pendiente${s.pend > 1 ? "s" : ""}</span>` : s.tot ? '<span class="tag ok">Al día</span>' : '<span class="tag gris">Sin envíos</span>'}
+      <span class="tag ${completo ? "ok" : ck.ok ? "warn" : "falta"}" title="Checklist de ${etiquetaPeriodo(per)}">📋 ${ck.ok}/${ck.tot}</span>
+      ${s.pend ? `<span class="tag warn">${s.pend} por revisar</span>` : ""}
       <div class="acciones"><button class="btn sm">Ver documentos ›</button></div>
     </div>`;
   }).join("");
@@ -453,19 +538,47 @@ function renderGrid() {
 // Vista 2: documentos de la empresa elegida
 function renderDetalle(emp) {
   const e = empresas.get(emp);
-  const est = $("fEstado").value, txt = $("fTexto").value.trim().toLowerCase();
+  const est = $("fEstado").value, txt = $("fTexto").value.trim().toLowerCase(), per = $("fPeriodo").value, tipo = $("fTipo").value;
   const base = filtrados ?? todos.filter(a => a.empresaId === emp);
   const pend = base.filter(a => !a.revisado).length;
   $("detNombre").textContent = e?.nombre || "";
-  $("detInfo").textContent = `${base.length} documento${base.length === 1 ? "" : "s"} · ${pend ? pend + " pendiente" + (pend > 1 ? "s" : "") : "todo revisado"}`;
+  $("detInfo").textContent = `${base.length} documento${base.length === 1 ? "" : "s"} · ${pend ? pend + " por revisar" : "todo revisado"}`;
+  // Opciones de tipo: checklist + Otros + lo que ya exista
+  const tipos = [...new Set([...opcionesTipo(ckDe(e)), ...base.map(a => a.categoria).filter(Boolean)])];
+  const tSel = $("fTipo").value;
+  $("fTipo").innerHTML = '<option value="">Todos los tipos</option>' + tipos.map(t => `<option ${t === tSel ? "selected" : ""}>${esc(t)}</option>`).join("") + '<option value="__sin">Sin tipo</option>';
+  $("fTipo").value = tipos.includes(tSel) || tSel === "__sin" ? tSel : "";
+  const aSel = $("aTipo").value;
+  $("aTipo").innerHTML = opcionesTipo(ckDe(e)).map(t => `<option ${t === aSel ? "selected" : ""}>${esc(t)}</option>`).join("");
+  // Checklist del periodo
+  if (per) {
+    const c = estadoChecklist(ckDe(e), base, per), ok = c.filter(x => x.ok).length;
+    $("detChecklist").innerHTML = `<div class="row between"><b>📋 ${etiquetaPeriodo(per)}: ${ok} de ${c.length} recibidos</b>
+      <button class="btn sm" data-ck="${esc(emp)}">Editar checklist</button></div>
+      <div class="ck-items">${c.map(x => `<button class="ck-item ${x.ok ? "ok" : ""} ${$("fTipo").value === x.item ? "sel" : ""}" data-tipo="${esc(x.item)}">${x.ok ? "✓" : "○"} ${esc(x.item)}</button>`).join("")}</div>`;
+    $("detChecklist").classList.remove("hidden");
+  } else $("detChecklist").classList.add("hidden");
   vistos = base.filter(a =>
+    (!per || a.periodo === per) &&
+    (!$("fTipo").value || ($("fTipo").value === "__sin" ? !a.categoria : a.categoria === $("fTipo").value)) &&
     (!est || (est === "pend" ? !a.revisado : a.revisado)) &&
     (!txt || (a.nombre + " " + (a.nota || "")).toLowerCase().includes(txt)));
   porRuta = new Map(vistos.map(a => [a.path, a]));
   $("bRevTodo").disabled = !vistos.some(a => !a.revisado);
+  $("bZip").disabled = !vistos.length;
   $("listaArch").innerHTML = vistos.length ? vistos.map(filaArchivo).join("")
-    : `<div class="card muted" style="text-align:center">${est === "pend" ? "🎉 No hay documentos pendientes." : "Sin documentos."}</div>`;
+    : `<div class="card muted" style="text-align:center">${est === "pend" ? "🎉 No hay documentos pendientes." : per ? "Sin documentos en " + etiquetaPeriodo(per) + "." : "Sin documentos."}</div>`;
+  if (!$("visor").classList.contains("hidden")) {
+    const i = vistos.findIndex(x => x.path === vPath);
+    if (i >= 0) { vIdx = i; visorPintarBarra(); }
+    else if (vistos.length) visorAbrir(Math.min(vIdx, vistos.length - 1)); else visorCerrar();
+  }
 }
+$("detChecklist").onclick = e => {
+  const t = e.target.closest("[data-tipo]"); if (t) { $("fTipo").value = $("fTipo").value === t.dataset.tipo ? "" : t.dataset.tipo; return renderArchivos(); }
+  const c = e.target.closest("[data-ck]"); if (c) abrirCk(c.dataset.ck);
+};
+
 // ---------- Subir documentos desde el panel ----------
 const TIPOS = { pdf:"application/pdf", xml:"text/xml", csv:"text/csv", xls:"application/vnd.ms-excel",
   xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", doc:"application/msword",
@@ -520,11 +633,11 @@ async function preparar(f) {
 }
 const PARTE = 600000;
 const aB64 = u8 => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
-async function subirAEmpresa(empId, it, nota) {
+async function subirAEmpresa(empId, it, nota, periodo, categoria) {
   const p = await preparar(it.file);
   if (p.blob.size > MAX_MB * 1048576) throw new Error("Archivo muy grande");
   const base = { nombre: p.nombre.slice(0, 200), tipo: p.tipo, nota, fecha: serverTimestamp(), revisado: true,
-    empresaId: empId, origen: "despacho", subidoPor: (auth.currentUser?.email || "").toLowerCase() };
+    empresaId: empId, origen: "despacho", subidoPor: (auth.currentUser?.email || "").toLowerCase(), periodo, categoria };
   if (ALMACENAMIENTO === "storage") {
     const limpio = p.nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w.\-]+/g, "_").slice(-80);
     const ruta = `empresas/${empId}/${Date.now()}_${rnd(3)}_${limpio}`;
@@ -550,7 +663,7 @@ $("aSubir").onclick = async () => {
   const nota = $("aNota").value.trim().slice(0, 300);
   let ok = 0, fallos = 0;
   for (const it of aCola) {
-    try { await subirAEmpresa(empId, it, nota); it.estado = "ok"; ok++; }
+    try { await subirAEmpresa(empId, it, nota, $("aPeriodo").value, $("aTipo").value); it.estado = "ok"; ok++; }
     catch (e) { console.error(e); it.estado = "error"; it.pct = 0; fallos++; }
   }
   aCola = aCola.filter(x => x.estado !== "ok");
@@ -560,25 +673,23 @@ $("aSubir").onclick = async () => {
 };
 
 function filaArchivo(a) {
-  {
-    const img = a.url && (a.tipo || "").startsWith("image/") && !/hei[cf]/.test(a.tipo);
-    const abrir = a.url
-      ? `<a class="btn sm" href="${esc(a.url)}" target="_blank" rel="noopener">Abrir</a>`
-      : `<button class="btn sm" data-act="abrir" data-p="${esc(a.path)}">Abrir</button>`;
-    return `<div class="item ${a.revisado ? "" : "nuevo"}">
-      <div class="ico">${img ? `<img loading="lazy" src="${esc(a.url)}" alt="">` : esc(ext(a.nombre))}</div>
-      <div class="info">
-        <div class="nm">${esc(a.nombre)}</div>
-        <div class="muted small">${fmt(a.fecha?.toDate?.())} · ${tam(a.tamano)}${a.origen === "despacho" ? ` · <span class="tag azul">Subido por ${esc(nombreUsuario(a.subidoPor || ""))}</span>` : ""}</div>
-        ${a.nota ? `<div class="small nota">“${esc(a.nota)}”</div>` : ""}
-      </div>
-      <span class="tag ${a.revisado ? "ok" : "warn"}">${a.revisado ? "Revisado" : "Pendiente"}</span>
-      <div class="acciones">
-        ${abrir}
-        <button class="btn sm" data-act="rev" data-p="${esc(a.path)}">${a.revisado ? "Desmarcar" : "✓ Revisado"}</button>
-        <button class="btn sm danger" data-act="del" data-p="${esc(a.path)}">Eliminar</button>
-      </div></div>`;
-  }
+  const img = a.url && (a.tipo || "").startsWith("image/") && !/hei[cf]/.test(a.tipo);
+  return `<div class="item ${a.revisado ? "" : "nuevo"}">
+    <button class="ico ico-btn" data-act="ver" data-p="${esc(a.path)}" title="Vista previa">${img ? `<img loading="lazy" src="${esc(a.url)}" alt="">` : esc(ext(a.nombre))}</button>
+    <div class="info">
+      <button class="nm nm-btn" data-act="ver" data-p="${esc(a.path)}">${esc(a.nombre)}</button>
+      <div class="muted small">${fmt(a.fecha?.toDate?.())} · ${tam(a.tamano)}
+        ${a.periodo ? ` · <span class="tag gris">${etiquetaPeriodo(a.periodo)}</span>` : ""}
+        ${a.categoria ? ` <span class="tag azul">${esc(a.categoria)}</span>` : ""}
+        ${a.origen === "despacho" ? ` <span class="tag gris">Subido por ${esc(nombreUsuario(a.subidoPor || ""))}</span>` : ""}</div>
+      ${a.nota ? `<div class="small nota">“${esc(a.nota)}”</div>` : ""}
+    </div>
+    <span class="tag ${a.revisado ? "ok" : "warn"}">${a.revisado ? "Revisado" : "Pendiente"}</span>
+    <div class="acciones">
+      <button class="btn sm" data-act="ver" data-p="${esc(a.path)}">👁 Ver</button>
+      <button class="btn sm" data-act="rev" data-p="${esc(a.path)}">${a.revisado ? "Desmarcar" : "✓ Revisado"}</button>
+      <button class="btn sm danger" data-act="del" data-p="${esc(a.path)}">Eliminar</button>
+    </div></div>`;
 }
 $("listaArch").onclick = async e => {
   const b = e.target.closest("button[data-act]");
@@ -592,7 +703,7 @@ $("listaArch").onclick = async e => {
   if (!b) return;
   const a = porRuta.get(b.dataset.p); if (!a) return;
   if (b.dataset.act === "rev") await updateDoc(doc(db, a.path), { revisado: !a.revisado });
-  if (b.dataset.act === "abrir") abrirPartes(a);
+  if (b.dataset.act === "ver") visorAbrir(vistos.indexOf(a));
   if (b.dataset.act === "del") {
     if (!confirm(`¿Eliminar definitivamente "${a.nombre}"? No se puede deshacer.`)) return;
     try {
@@ -608,21 +719,200 @@ $("listaArch").onclick = async e => {
     } catch (err) { console.error(err); toast("No se pudo eliminar el archivo."); }
   }
 };
-// Modo gratis: arma el archivo desde sus partes y lo abre o descarga
-async function abrirPartes(a) {
-  const ver = /^(image\/|application\/pdf)/.test(a.tipo || "") && !/hei[cf]/.test(a.tipo);
-  const w = ver ? window.open("", "_blank") : null;
-  if (w) w.document.write('<p style="font:16px system-ui;padding:20px">Cargando…</p>');
-  else toast("Descargando…");
-  try {
+// ---------- Obtener el archivo (partes de Firestore o Storage) ----------
+const cacheBlob = new Map();
+async function obtenerBlob(a) {
+  if (cacheBlob.has(a.path)) return cacheBlob.get(a.path);
+  let blob;
+  if (a.url) blob = await (await fetch(a.url)).blob();
+  else {
     const s = await getDocs(collection(db, a.path, "partes"));
     const partes = s.docs.sort((x, y) => x.id - y.id).map(d => Uint8Array.from(atob(d.data().d), c => c.charCodeAt(0)));
-    const url = URL.createObjectURL(new Blob(partes, { type: a.tipo || "application/octet-stream" }));
-    if (w) w.location.href = url;
-    else { const l = document.createElement("a"); l.href = url; l.download = a.nombre; document.body.appendChild(l); l.click(); l.remove(); }
-    setTimeout(() => URL.revokeObjectURL(url), 300000);
-  } catch (err) { console.error(err); w?.close(); toast("No se pudo abrir el archivo."); }
+    blob = new Blob(partes, { type: a.tipo || "application/octet-stream" });
+  }
+  if (cacheBlob.size > 30) cacheBlob.delete(cacheBlob.keys().next().value);
+  cacheBlob.set(a.path, blob);
+  return blob;
 }
+function descargarBlob(blob, nombre) {
+  const url = URL.createObjectURL(blob), l = document.createElement("a");
+  l.href = url; l.download = nombre; document.body.appendChild(l); l.click(); l.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// ---------- Vista previa ----------
+let vIdx = -1, vUrl = null, vPath = null;
+function visorPintarBarra() {
+  const a = vistos[vIdx]; if (!a) return visorCerrar();
+  $("vNombre").textContent = a.nombre;
+  $("vInfo").textContent = [empresas.get(a.empresaId)?.nombre, a.periodo && etiquetaPeriodo(a.periodo), a.categoria, fmt(a.fecha?.toDate?.()), tam(a.tamano)].filter(Boolean).join(" · ");
+  $("vPos").textContent = `${vIdx + 1} / ${vistos.length}`;
+  $("vPrev").disabled = vIdx <= 0; $("vNext").disabled = vIdx >= vistos.length - 1;
+  $("vRev").textContent = a.revisado ? "Desmarcar" : "✓ Revisado";
+  $("vRev").className = "btn sm " + (a.revisado ? "" : "primary");
+}
+async function visorAbrir(i) {
+  if (i < 0 || i >= vistos.length) return;
+  vIdx = i; const a = vistos[i]; vPath = a.path;
+  $("visor").classList.remove("hidden"); document.body.style.overflow = "hidden";
+  visorPintarBarra();
+  if (vUrl) { URL.revokeObjectURL(vUrl); vUrl = null; }
+  const cuerpo = $("vCuerpo"); cuerpo.innerHTML = '<div class="visor-msg">Cargando…</div>';
+  const t = a.tipo || "", e = ext(a.nombre);
+  const esImg = t.startsWith("image/") && !/hei[cf]/.test(t), esPdf = t === "application/pdf";
+  const esTexto = /xml|csv|text/.test(t) || ["xml", "csv", "txt"].includes(e);
+  try {
+    let src;
+    if (a.url && (esImg || esPdf)) src = a.url;
+    else if (esImg || esPdf || esTexto) { const b = await obtenerBlob(a); if (vistos[vIdx] !== a) return; vUrl = src = URL.createObjectURL(b); if (esTexto) { cuerpo.innerHTML = `<pre class="visor-texto">${esc(formatearXML(await b.text()))}</pre>`; return; } }
+    if (esImg) cuerpo.innerHTML = `<img src="${src}" alt="">`;
+    else if (esPdf) cuerpo.innerHTML = `<iframe src="${src}" title="PDF"></iframe>`;
+    else cuerpo.innerHTML = `<div class="visor-msg"><div class="ico" style="width:72px;height:72px;font-size:18px;margin:0 auto 12px">${esc(e)}</div>
+      Este tipo de archivo (${esc(e.toUpperCase())}) no tiene vista previa.<br><br><button class="btn primary" id="vDesc2">⬇ Descargar para abrirlo</button></div>`;
+    $("vDesc2")?.addEventListener("click", visorDescargar);
+  } catch (err) { console.error(err); cuerpo.innerHTML = '<div class="visor-msg">No se pudo cargar la vista previa. Intenta descargarlo.</div>'; }
+}
+function formatearXML(t) {
+  if (!/^\s*</.test(t)) return t;
+  let n = 0;
+  return t.replace(/>\s*</g, ">\n<").split("\n").map(l => {
+    if (/^<\//.test(l)) n = Math.max(0, n - 1);
+    const r = "  ".repeat(n) + l;
+    if (/^<[^!?\/][^>]*[^\/]>$/.test(l) && !/<\//.test(l)) n++;
+    return r;
+  }).join("\n");
+}
+function visorCerrar() {
+  $("visor").classList.add("hidden"); document.body.style.overflow = ""; $("vCuerpo").innerHTML = "";
+  if (vUrl) { URL.revokeObjectURL(vUrl); vUrl = null; } vIdx = -1;
+}
+async function visorDescargar() {
+  const a = vistos[vIdx]; if (!a) return;
+  try { descargarBlob(await obtenerBlob(a), a.nombre); }
+  catch { if (a.url) window.open(a.url, "_blank"); else toast("No se pudo descargar."); }
+}
+$("vPrev").onclick = () => visorAbrir(vIdx - 1);
+$("vNext").onclick = () => visorAbrir(vIdx + 1);
+$("vCerrar").onclick = visorCerrar;
+$("vDesc").onclick = visorDescargar;
+$("vRev").onclick = async () => { const a = vistos[vIdx]; if (a) { await updateDoc(doc(db, a.path), { revisado: !a.revisado }); } };
+$("visor").onclick = e => { if (e.target === $("visor")) visorCerrar(); };
+document.addEventListener("keydown", e => {
+  if ($("visor").classList.contains("hidden")) return;
+  if (e.key === "Escape") visorCerrar();
+  if (e.key === "ArrowLeft") visorAbrir(vIdx - 1);
+  if (e.key === "ArrowRight") visorAbrir(vIdx + 1);
+});
+
+// ---------- Descargar ZIP ----------
+let jszipCarga = null;
+const cargarJSZip = () => jszipCarga ??= new Promise((ok, mal) => {
+  const sc = document.createElement("script");
+  sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+  sc.onload = () => ok(window.JSZip); sc.onerror = mal; document.head.appendChild(sc);
+});
+const limpiarNombre = t => String(t || "").replace(/[\\/:*?"<>|]+/g, "_").trim() || "archivo";
+$("bZip").onclick = async () => {
+  const lista = [...vistos]; if (!lista.length) return;
+  const e = empresas.get($("fEmpresa").value), per = $("fPeriodo").value;
+  if (lista.length > 150 && !confirm(`Son ${lista.length} archivos; puede tardar. ¿Continuar?`)) return;
+  $("bZip").disabled = true;
+  try {
+    const JSZip = await cargarJSZip(), zip = new JSZip(), usados = new Set();
+    let n = 0, fallos = 0;
+    for (const a of lista) {
+      toast(`Preparando ZIP… ${++n} de ${lista.length}`);
+      try {
+        const carpeta = `${a.periodo ? etiquetaPeriodo(a.periodo) : "Sin periodo"}/${limpiarNombre(a.categoria || "Sin tipo")}`;
+        let nombre = limpiarNombre(a.nombre), ruta = `${carpeta}/${nombre}`, k = 1;
+        while (usados.has(ruta)) ruta = `${carpeta}/${nombre.replace(/(\.[^.]+)?$/, ` (${++k})$1`)}`;
+        usados.add(ruta);
+        zip.file(ruta, await obtenerBlob(a));
+      } catch (err) { console.error(err); fallos++; }
+    }
+    toast("Comprimiendo…");
+    const blob = await zip.generateAsync({ type: "blob" });
+    descargarBlob(blob, `${limpiarNombre(e?.nombre || "documentos")} - ${per ? etiquetaPeriodo(per) : "todos"}.zip`);
+    toast(fallos ? `ZIP listo. ${fallos} archivo(s) no se pudieron incluir.` : `✓ ZIP listo con ${lista.length} archivo(s)`);
+  } catch (err) { console.error(err); toast("No se pudo crear el ZIP."); }
+  finally { $("bZip").disabled = !vistos.length; }
+};
+
+// ---------- Notificaciones de documentos nuevos ----------
+const tInicio = Date.now();
+let primeraCarga = true, sinVer = 0;
+const notifOn = () => { try { return localStorage.getItem("avisos") === "1"; } catch { return false; } };
+function pintarBotonNotif() { $("bNotif").textContent = notifOn() ? "🔔 Avisos" : "🔕 Avisos"; }
+pintarBotonNotif();
+$("bNotif").onclick = async () => {
+  if (notifOn()) { try { localStorage.setItem("avisos", "0"); } catch {} pintarBotonNotif(); return toast("Avisos desactivados"); }
+  if ("Notification" in window && Notification.permission !== "granted") await Notification.requestPermission();
+  try { localStorage.setItem("avisos", "1"); } catch {}
+  pintarBotonNotif(); sonar();
+  toast(("Notification" in window && Notification.permission === "granted")
+    ? "🔔 Avisos activados: te avisaremos cuando llegue un documento"
+    : "Avisos con sonido activados (el navegador bloqueó las notificaciones)");
+};
+function sonar() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1320].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = "sine";
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.18);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + i * 0.18 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.18 + 0.25);
+      o.connect(g).connect(ctx.destination); o.start(ctx.currentTime + i * 0.18); o.stop(ctx.currentTime + i * 0.18 + 0.3);
+    });
+  } catch {}
+}
+function tituloBase() { return "Panel · " + NOMBRE_DESPACHO; }
+function actualizarTitulo() { document.title = (sinVer ? `(${sinVer}) ` : "") + tituloBase(); }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { sinVer = 0; actualizarTitulo(); } });
+function avisarNuevos(snap) {
+  if (primeraCarga) { primeraCarga = false; return; }
+  const nuevos = snap.docChanges().filter(c => c.type === "added").map(c => c.doc.data())
+    .filter(a => a.origen !== "despacho" && (a.fecha?.toMillis?.() || Date.now()) > tInicio - 60000);
+  if (!nuevos.length) return;
+  const emp = empresas.get(nuevos[0].empresaId)?.nombre || "Una empresa";
+  const texto = nuevos.length === 1 ? `${emp} envió "${nuevos[0].nombre}"` : `${emp} envió ${nuevos.length} documentos`;
+  toast("📥 " + texto);
+  if (document.visibilityState !== "visible") { sinVer += nuevos.length; actualizarTitulo(); }
+  if (!notifOn()) return;
+  sonar();
+  if ("Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible") {
+    const op = { body: texto, icon: "icon-192.png", badge: "icon-192.png", tag: "doc-nuevo", renotify: true };
+    navigator.serviceWorker?.getRegistration().then(r => r ? r.showNotification("Documento nuevo", op) : new Notification("Documento nuevo", op))
+      .catch(() => { try { new Notification("Documento nuevo", op); } catch {} });
+  }
+}
+
+// ---------- Checklist: configuración ----------
+let ckEmp = null;
+function abrirCk(id) {
+  const e = empresas.get(id); if (!e) return; ckEmp = id;
+  $("ckTitulo").textContent = "Checklist de " + e.nombre;
+  $("ckTexto").value = (e.checklist?.length ? e.checklist : ckDe(e)).join("\n");
+  $("modalCk").classList.remove("hidden");
+}
+const lineas = t => [...new Set(t.split("\n").map(x => x.trim()).filter(Boolean))].slice(0, 30).map(x => x.slice(0, 80));
+$("ckCancelar").onclick = () => $("modalCk").classList.add("hidden");
+$("modalCk").onclick = e => { if (e.target === $("modalCk")) $("modalCk").classList.add("hidden"); };
+$("ckGuardar").onclick = async () => {
+  const l = lineas($("ckTexto").value);
+  const igualGeneral = JSON.stringify(l) === JSON.stringify(checklistDe(null, checklistGeneral));
+  await updateDoc(doc(db, "empresas", ckEmp), { checklist: igualGeneral ? [] : l });
+  $("modalCk").classList.add("hidden"); toast(igualGeneral ? "Usará el checklist general" : "Checklist guardado");
+};
+$("ckGeneral").onclick = async () => {
+  await updateDoc(doc(db, "empresas", ckEmp), { checklist: [] });
+  $("modalCk").classList.add("hidden"); toast("Ahora usa el checklist general");
+};
+$("bGeneral").onclick = async () => {
+  const l = lineas($("cGeneral").value);
+  if (!l.length) return msg("cGenMsg", "Escribe al menos un documento.", "err");
+  await setDoc(doc(db, "ajustes", "general"), { checklist: l }, { merge: true });
+  msg("cGenMsg", "✓ Checklist general guardado.", "ok");
+};
 
 $("bRevTodo").onclick = async () => {
   const p = vistos.filter(a => !a.revisado).slice(0, 450);
@@ -653,6 +943,7 @@ function renderEmpresas() {
           <button class="btn sm" data-act="arch" data-id="${e.id}">Ver archivos</button>
           <button class="btn sm" data-act="copiar" data-id="${e.id}">Copiar acceso</button>
           <button class="btn sm wa" data-act="wa" data-id="${e.id}">WhatsApp</button>
+          <button class="btn sm" data-act="checklist" data-id="${e.id}">📋 Checklist${e.checklist?.length ? " (propio)" : ""}</button>
           <button class="btn sm" data-act="editar" data-id="${e.id}">Editar</button>
           <button class="btn sm" data-act="pin" data-id="${e.id}">Nuevo PIN</button>
           <button class="btn sm ${e.activo ? "danger" : ""}" data-act="activo" data-id="${e.id}">${e.activo ? "Desactivar" : "Activar"}</button>
@@ -667,6 +958,7 @@ $("listaEmp").onclick = async ev => {
   switch (b.dataset.act) {
     case "ver": pinVisible.has(e.id) ? pinVisible.delete(e.id) : pinVisible.add(e.id); renderEmpresas(); break;
     case "arch": irBandeja(e.id); break;
+    case "checklist": abrirCk(e.id); break;
     case "copiar": await navigator.clipboard.writeText(textoAcceso(e)); toast("Link y PIN copiados"); break;
     case "wa": window.open(`https://wa.me/${telWa(e.telefono)}?text=${encodeURIComponent(textoAcceso(e))}`, "_blank"); break;
     case "activo":

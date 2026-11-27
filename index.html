@@ -9,13 +9,16 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="google" content="notranslate">
-<link rel="stylesheet" href="estilos.css?v=10">
+<link rel="manifest" href="manifest-portal.webmanifest">
+<meta name="theme-color" content="#1d4ed8">
+<link rel="stylesheet" href="estilos.css?v=11">
 </head>
 <body>
 <main class="wrap">
   <header class="brand">
     <img class="logo" src="logo.svg?v=1" alt="">
-    <div><h1 id="titulo">Portal de Documentos</h1><p class="muted small">Envío seguro de documentos a tu contador</p></div>
+    <div class="grow"><h1 id="titulo">Portal de Documentos</h1><p class="muted small">Envío seguro de documentos a tu contador</p></div>
+    <button class="btn ghost sm hidden" id="bInstalar">📲 Instalar app</button>
   </header>
 
   <!-- Link inválido -->
@@ -42,7 +45,20 @@
       <button id="bSalir" class="btn ghost">Salir</button>
     </div>
 
+    <div class="card ck-card" id="ckCard">
+      <div class="row between" style="margin-bottom:8px">
+        <h3 style="margin:0">📋 Lo que necesitamos de ti</h3>
+        <select id="ckPer" style="width:auto"></select>
+      </div>
+      <div id="ckLista" class="ck-items"></div>
+      <p id="ckResumen" class="muted small" style="margin-top:8px"></p>
+    </div>
+
     <div class="card">
+      <div class="sel-doble" style="margin:0 0 12px">
+        <label><span class="lbl">¿De qué periodo es?</span><select id="periodo"></select></label>
+        <label><span class="lbl">¿Qué documento es?</span><select id="categoria"></select></label>
+      </div>
       <label id="drop" class="drop">
         <input type="file" id="archivos" multiple accept="image/*,application/pdf,.pdf,.xml,.csv,.xls,.xlsx,.doc,.docx,.zip">
         <div class="drop-icon">⬆</div>
@@ -69,6 +85,9 @@ import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, orderBy, 
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { firebaseConfig, DOMINIO_EMPRESAS, MAX_MB, NOMBRE_DESPACHO, ALMACENAMIENTO } from "./config.js";
 import { iniciarActividad, cerrarActividad } from "./actividad.js";
+import { etiquetaPeriodo, periodoAnterior, checklistDe, opcionesTipo, estadoChecklist, opcionesPeriodoHTML } from "./comun.js";
+import { iniciarPWA } from "./pwa.js";
+iniciarPWA(document.getElementById("bInstalar"));
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app), db = getFirestore(app);
@@ -91,9 +110,32 @@ const tipoDe = f => f.type || TIPOS[ext(f.name)] || "application/octet-stream";
 
 document.title = NOMBRE_DESPACHO; $("titulo").textContent = NOMBRE_DESPACHO; $("maxMb").textContent = MAX_MB;
 
-const empId = (new URLSearchParams(location.search).get("e") || "").trim().toLowerCase();
+// El código de la empresa viene en el link (?e=...). Se recuerda para cuando abran la app instalada.
+let empId = (new URLSearchParams(location.search).get("e") || "").trim().toLowerCase();
+try {
+  if (/^[a-z0-9]{8,32}$/.test(empId)) localStorage.setItem("portal_e", empId);
+  else empId = localStorage.getItem("portal_e") || "";
+} catch {}
 const correo = `${empId}@${DOMINIO_EMPRESAS}`;
-let unsub = null, cola = [], sec = 0, subiendo = false;
+let unsub = null, cola = [], sec = 0, subiendo = false, empData = null, general = [], misArchivos = [];
+$("periodo").innerHTML = opcionesPeriodoHTML(periodoAnterior());
+$("ckPer").innerHTML = opcionesPeriodoHTML(periodoAnterior());
+$("ckPer").onchange = () => { $("periodo").value = $("ckPer").value; pintarChecklist(); };
+$("periodo").onchange = () => { $("ckPer").value = $("periodo").value; pintarChecklist(); };
+function pintarChecklist() {
+  const lista = checklistDe(empData, general);
+  const sel = $("categoria").value;
+  $("categoria").innerHTML = opcionesTipo(lista).map(t => `<option ${t === sel ? "selected" : ""}>${esc(t)}</option>`).join("");
+  const per = $("ckPer").value, c = estadoChecklist(lista, misArchivos, per), ok = c.filter(x => x.ok).length;
+  $("ckLista").innerHTML = c.map(x => `<button class="ck-item ${x.ok ? "ok" : ""}" data-tipo="${esc(x.item)}">${x.ok ? "✓" : "○"} ${esc(x.item)}</button>`).join("");
+  $("ckResumen").textContent = ok === c.length ? `🎉 ¡Listo! Ya recibimos todo lo de ${etiquetaPeriodo(per)}.`
+    : `Recibido ${ok} de ${c.length} para ${etiquetaPeriodo(per)}. Toca uno para enviarlo.`;
+}
+$("ckLista").onclick = e => {
+  const b = e.target.closest("[data-tipo]"); if (!b) return;
+  $("categoria").value = b.dataset.tipo; $("periodo").value = $("ckPer").value;
+  $("drop").scrollIntoView({ behavior: "smooth", block: "center" }); $("archivos").click();
+};
 
 if (!/^[a-z0-9]{8,32}$/.test(empId)) show("vError");
 else {
@@ -124,6 +166,9 @@ async function entrar() {
     const s = await getDoc(doc(db, "empresas", empId));
     if (!s.exists() || s.data().activo !== true) return desactivada();
     $("empNombre").textContent = s.data().nombre;
+    empData = s.data();
+    try { general = (await getDoc(doc(db, "ajustes", "general"))).data()?.checklist || []; } catch { general = []; }
+    pintarChecklist();
     $("drop").classList.remove("off");
   } catch { return desactivada(); }
   iniciarActividad(db, auth.currentUser, "empresa", empId);
@@ -132,13 +177,16 @@ async function entrar() {
   unsub = onSnapshot(
     query(collection(db, "empresas", empId, "archivos"), orderBy("fecha", "desc"), limit(100)),
     snap => {
+      misArchivos = snap.docs.map(d => d.data()).filter(a => a.origen !== "despacho");
+      pintarChecklist();
       $("lista").innerHTML = !snap.docs.some(d => d.data().origen !== "despacho") ? '<p class="muted small">Aún no has enviado documentos.</p>' :
         snap.docs.filter(d => d.data().origen !== "despacho").map(d => {
           const a = d.data(), f = a.fecha?.toDate?.();
           return `<div class="item">
             <div class="ico">${esc(ext(a.nombre))}</div>
             <div class="info"><div class="nm">${esc(a.nombre)}</div>
-              <div class="muted small">${f ? f.toLocaleString("es-MX",{dateStyle:"medium",timeStyle:"short"}) : "Enviando…"} · ${tam(a.tamano)}</div></div>
+              <div class="muted small">${f ? f.toLocaleString("es-MX",{dateStyle:"medium",timeStyle:"short"}) : "Enviando…"} · ${tam(a.tamano)}</div>
+              ${a.periodo || a.categoria ? `<div class="small">${a.periodo ? `<span class="tag gris">${etiquetaPeriodo(a.periodo)}</span> ` : ""}${a.categoria ? `<span class="tag azul">${esc(a.categoria)}</span>` : ""}</div>` : ""}</div>
             <span class="tag ${a.revisado ? "ok" : "warn"}">${a.revisado ? "Revisado" : "Recibido"}</span>
           </div>`;
         }).join("");
@@ -222,7 +270,8 @@ async function subirFirestore(it, nota, p) {
   }
   await setDoc(aRef, {
     nombre: p.nombre.slice(0, 200), tipo: p.tipo, tamano: bytes.length, nota,
-    fecha: serverTimestamp(), revisado: false, empresaId: empId, almacen: "fs", partes: n
+    fecha: serverTimestamp(), revisado: false, empresaId: empId, almacen: "fs", partes: n,
+    periodo: $("periodo").value, categoria: $("categoria").value
   });
 }
 
@@ -236,7 +285,8 @@ async function subirStorage(it, nota, p) {
   const url = await getDownloadURL(task.snapshot.ref);
   await addDoc(collection(db, "empresas", empId, "archivos"), {
     nombre: p.nombre.slice(0, 200), ruta, url, tipo, tamano: p.blob.size, nota,
-    fecha: serverTimestamp(), revisado: false, empresaId: empId, almacen: "st"
+    fecha: serverTimestamp(), revisado: false, empresaId: empId, almacen: "st",
+    periodo: $("periodo").value, categoria: $("categoria").value
   });
 }
 $("bSubir").onclick = async () => {

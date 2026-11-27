@@ -30,13 +30,15 @@ service cloud.firestore {
       match /archivos/{archivoId} {
         allow read: if isAdmin() || (isEmpresa(id) && activa(id));
         allow create: if (isAdmin()
-          && request.resource.data.keys().hasOnly(['nombre','ruta','url','tipo','tamano','nota','fecha','revisado','empresaId','almacen','partes','origen','subidoPor'])
+          && request.resource.data.keys().hasOnly(['nombre','ruta','url','tipo','tamano','nota','fecha','revisado','empresaId','almacen','partes','origen','subidoPor','periodo','categoria'])
           && request.resource.data.empresaId == id
           && request.resource.data.subidoPor == request.auth.token.email)
           || (isEmpresa(id) && activa(id)
-          && request.resource.data.keys().hasOnly(['nombre','ruta','url','tipo','tamano','nota','fecha','revisado','empresaId','almacen','partes'])
+          && request.resource.data.keys().hasOnly(['nombre','ruta','url','tipo','tamano','nota','fecha','revisado','empresaId','almacen','partes','periodo','categoria'])
           && request.resource.data.empresaId == id
           && request.resource.data.revisado == false
+          && (!('periodo' in request.resource.data) || (request.resource.data.periodo is string && request.resource.data.periodo.size() <= 7))
+          && (!('categoria' in request.resource.data) || (request.resource.data.categoria is string && request.resource.data.categoria.size() <= 80))
           && request.resource.data.fecha == request.time
           && (!('ruta' in request.resource.data) || request.resource.data.ruta.matches('empresas/' + id + '/.*'))
           && request.resource.data.nota.size() <= 300);
@@ -52,6 +54,12 @@ service cloud.firestore {
           allow delete: if isAdmin();
         }
       }
+    }
+
+    // Ajustes (checklist general): todos los que inician sesión lo leen; solo el panel lo cambia
+    match /ajustes/{doc} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
     }
 
     // Usuarios del panel: solo el dueño los administra
