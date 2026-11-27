@@ -94,3 +94,4 @@ a{color:var(--pri)}
 @media (max-width:760px){.filtros.det{grid-template-columns:1fr}}
 /* Actividad */
 .punto{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 4px rgba(34,197,94,.2);flex:none}
+.punto.off{background:var(--line);box-shadow:none}

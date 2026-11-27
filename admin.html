@@ -9,7 +9,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="google" content="notranslate">
-<link rel="stylesheet" href="estilos.css?v=7">
+<link rel="stylesheet" href="estilos.css?v=8">
 </head>
 <body>
 <main class="wrap wide">
@@ -97,8 +97,8 @@
       </div>
       <div class="card">
         <div class="row between" style="margin-bottom:12px">
-          <h3 style="margin:0">Últimos accesos</h3>
-          <select id="fAcc" style="width:auto"><option value="">Todos</option><option value="panel">Usuarios del panel</option><option value="empresa">Empresas</option></select>
+          <h3 style="margin:0">Accesos</h3>
+          <select id="fAcc" style="width:auto"><option value="panel">Todos los usuarios</option><option value="empresa">Todas las empresas</option><option value="">Historial de accesos</option></select>
         </div>
         <div id="listaAcc" class="lista"></div>
       </div>
@@ -203,7 +203,7 @@ function iniciar(u) {
     unsubs.push(onSnapshot(query(collection(db, "accesos"), orderBy("fecha", "desc"), limit(200)), s => { accesos = s.docs.map(d => d.data()); renderActividad(); }, errorGeneral));
   }
   if (esDueno) unsubs.push(onSnapshot(query(collection(db, "admins"), orderBy("nombre")), s => {
-    usuarios = s.docs.map(d => ({ id: d.id, ...d.data() })); renderUsuarios();
+    usuarios = s.docs.map(d => ({ id: d.id, ...d.data() })); renderUsuarios(); renderActividad();
   }, errorGeneral));
   if (esDueno) unsubs.push(onSnapshot(collection(db, "privadoUsu"), s => {
     passUsu = new Map(s.docs.map(d => [d.id, d.data().pass])); renderUsuarios();
@@ -231,7 +231,7 @@ function errorIndice(e) {
   $("indiceMsg").classList.remove("hidden");
   $("listaArch").innerHTML = "";
 }
-function todoRender() { renderArchivos(); renderEmpresas(); stats(); }
+function todoRender() { renderArchivos(); renderEmpresas(); stats(); renderActividad(); }
 
 // ---------- Pestañas ----------
 document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
@@ -346,7 +346,8 @@ function renderActividad() {
   }).join("") : '<p class="muted small">No hay nadie conectado en este momento.</p>';
 
   const f = $("fAcc").value;
-  const lista = accesos.filter(a => !f || a.tipo === f);
+  if (f) return renderPadron(f, online);
+  const lista = accesos;
   $("listaAcc").innerHTML = lista.length ? lista.map(a => {
     const q = quienEs(a.quien, a.tipo, a.empresaId), d = a.fecha?.toDate?.();
     return `<div class="item">
@@ -354,6 +355,28 @@ function renderActividad() {
       <div style="text-align:right"><div class="small"><b>${haceCuanto(d)}</b></div><div class="muted small">${fmt(d)}</div></div>
     </div>`;
   }).join("") : '<p class="muted small">Sin accesos registrados todavía.</p>';
+}
+// Lista de TODOS los usuarios o empresas, hayan entrado o no
+function renderPadron(tipo, online) {
+  const enLinea = new Set(online.map(x => x.quien));
+  const ses = new Map(sesiones.map(x => [x.quien, x]));
+  const veces = {}; accesos.forEach(a => { veces[a.quien] = (veces[a.quien] || 0) + 1; });
+  const gente = tipo === "panel"
+    ? [...duenos.map(c => ({ correo: c, nombre: c, det: "Dueño" })),
+       ...usuarios.map(u => ({ correo: u.id, nombre: u.nombre, det: "Usuario: " + nombreUsuario(u.id) }))]
+    : [...empresas.values()].map(e => ({ correo: correoDe(e.id), nombre: e.nombre, det: e.rfc || "Sin RFC", inactiva: !e.activo }));
+  gente.forEach(p => { p.ult = ses.get(p.correo)?.ultimaVez?.toDate?.() || null; p.on = enLinea.has(p.correo); });
+  gente.sort((a, b) => (b.on - a.on) || ((b.ult?.getTime() || 0) - (a.ult?.getTime() || 0)) || a.nombre.localeCompare(b.nombre, "es"));
+  $("listaAcc").innerHTML = gente.length ? gente.map(p => `
+    <div class="item">
+      ${p.on ? '<span class="punto"></span>' : '<span class="punto off"></span>'}
+      <div class="info"><div class="nm">${esc(p.nombre)} ${p.inactiva ? '<span class="tag off">Inactiva</span>' : ""}</div>
+        <div class="muted small">${esc(p.det)}${ses.get(p.correo)?.dispositivo ? " · " + esc(ses.get(p.correo).dispositivo) : ""}</div></div>
+      <div style="text-align:right">
+        ${p.on ? '<span class="tag ok">En línea</span>' : p.ult ? `<div class="small"><b>${haceCuanto(p.ult)}</b></div><div class="muted small">Último acceso: ${fmt(p.ult)}</div>` : '<span class="tag gris">Nunca ha entrado</span>'}
+        ${veces[p.correo] ? `<div class="muted small">${veces[p.correo]} acceso${veces[p.correo] > 1 ? "s" : ""} recientes</div>` : ""}
+      </div>
+    </div>`).join("") : `<p class="muted small">No hay ${tipo === "panel" ? "usuarios" : "empresas"} registrados.</p>`;
 }
 $("fAcc").onchange = renderActividad;
 setInterval(renderActividad, 30000);
