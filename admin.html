@@ -312,7 +312,7 @@ function iniciar(u) {
     if (document.activeElement !== $("cGeneral")) $("cGeneral").value = checklistDe(null, checklistGeneral).join("\n");
     todoRender();
   }, () => {}));
-  if (esDueno) unsubs.push(onSnapshot(collection(db, "privado"), s => {
+  unsubs.push(onSnapshot(collection(db, "privado"), s => {
     pins = new Map(s.docs.map(d => [d.id, d.data().pin])); renderEmpresas();
   }, errorGeneral));
   // Los 1000 archivos más recientes de todas las empresas
@@ -992,15 +992,15 @@ function renderEmpresas() {
         <div class="info">
           <div class="nm">${esc(e.nombre)} ${e.activo ? "" : '<span class="tag off">Inactiva</span>'} ${pend[e.id] ? `<span class="tag warn">${pend[e.id]} pendiente${pend[e.id] > 1 ? "s" : ""}</span>` : ""}</div>
           <div class="muted small">${e.rfc ? esc(e.rfc) + " · " : ""}${e.telefono ? "📱 " + esc(e.telefono) + " · " : ""}${tot[e.id] || 0} recibidos recientes</div>
-          ${esDueno ? `<div class="small">PIN: <span class="mono">${ver ? esc(pin) : "••••••"}</span> <button class="x" data-act="ver" data-id="${e.id}" title="Mostrar PIN">${ver ? "🙈" : "👁"}</button></div>` : ""}
+          <div class="small">PIN: <span class="mono">${ver ? esc(pin) : "••••••"}</span> <button class="x" data-act="ver" data-id="${e.id}" title="Mostrar PIN">${ver ? "🙈" : "👁"}</button></div>
         </div>
         <div class="acciones">
           <button class="btn sm" data-act="arch" data-id="${e.id}">Ver archivos</button>
-          ${esDueno ? `<button class="btn sm" data-act="copiar" data-id="${e.id}">Copiar acceso</button>
-          <button class="btn sm wa" data-act="wa" data-id="${e.id}">WhatsApp</button>` : ""}
+          <button class="btn sm" data-act="copiar" data-id="${e.id}">Copiar acceso</button>
+          <button class="btn sm wa" data-act="wa" data-id="${e.id}">WhatsApp</button>
           <button class="btn sm" data-act="checklist" data-id="${e.id}">📋 Checklist${e.checklist?.length ? " (propio)" : ""}</button>
           <button class="btn sm" data-act="editar" data-id="${e.id}">Editar</button>
-          ${esDueno ? `<button class="btn sm" data-act="pin" data-id="${e.id}">Nuevo PIN</button>` : ""}
+          <button class="btn sm" data-act="pin" data-id="${e.id}">Nuevo PIN</button>
           <button class="btn sm ${e.activo ? "danger" : ""}" data-act="activo" data-id="${e.id}">${e.activo ? "Desactivar" : "Activar"}</button>
         </div></div>`;
     }).join("");
@@ -1010,7 +1010,6 @@ const textoAcceso = e => `Hola, ${e.nombre}. Este es tu portal para enviarnos tu
 $("listaEmp").onclick = async ev => {
   const b = ev.target.closest("button[data-act]"); if (!b) return;
   const e = empresas.get(b.dataset.id); if (!e) return;
-  if (!esDueno && ["ver", "copiar", "wa", "pin"].includes(b.dataset.act)) return;
   switch (b.dataset.act) {
     case "ver": pinVisible.has(e.id) ? pinVisible.delete(e.id) : pinVisible.add(e.id); renderEmpresas(); break;
     case "arch": irBandeja(e.id); break;
@@ -1056,8 +1055,7 @@ $("fAlta").onsubmit = async ev => {
     });
     await setDoc(doc(db, "privado", id), { pin });
     $("fAlta").reset(); pinVisible.add(id);
-    msg("altaMsg", esDueno ? `✓ ${nombre} creada. PIN: ${pin}. Usa "WhatsApp" o "Copiar acceso" para enviárselo.`
-      : `✓ ${nombre} creada. El dueño le enviará su link y PIN de acceso.`, "ok");
+    msg("altaMsg", `✓ ${nombre} creada. PIN: ${pin}. Usa "WhatsApp" o "Copiar acceso" para enviárselo.`, "ok");
   } catch (err) { console.error(err); msg("altaMsg", "No se pudo crear: " + (err.code || err.message), "err"); }
   finally { $("bAlta").disabled = false; }
 };

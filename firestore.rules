@@ -86,10 +86,9 @@ service cloud.firestore {
       allow read, write: if isOwner();
     }
 
-    // PINs: solo el dueño los ve o cambia; cualquier usuario puede guardar el de una empresa nueva
+    // PINs: solo administradores
     match /privado/{id} {
-      allow read, update, delete: if isOwner();
-      allow create: if isAdmin();
+      allow read, write: if isAdmin();
     }
 
     // Bandeja general (consulta de todos los archivos): solo el administrador
