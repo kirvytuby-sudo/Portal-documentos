@@ -2,10 +2,15 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ⚠️ Cambia por tu correo de administrador (el mismo que en config.js)
-    function isAdmin() {
+    // Dueño (el mismo correo que en config.js)
+    function isOwner() {
       return request.auth != null
         && request.auth.token.email in ['kirvytuby@gmail.com'];
+    }
+    // Dueño o usuario dado de alta en la pestaña "Usuarios"
+    function isAdmin() {
+      return isOwner() || (request.auth != null && request.auth.token.email is string
+        && exists(/databases/$(database)/documents/admins/$(request.auth.token.email)));
     }
     // Cada empresa inicia sesión como <id>@empresas.example.com con su PIN
     function isEmpresa(id) {
@@ -45,7 +50,13 @@ service cloud.firestore {
       }
     }
 
-    // PINs: solo el administrador
+    // Usuarios del panel: solo el dueño los administra
+    match /admins/{correo} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.token.email == correo);
+      allow write: if isOwner();
+    }
+
+    // PINs: solo administradores
     match /privado/{id} {
       allow read, write: if isAdmin();
     }

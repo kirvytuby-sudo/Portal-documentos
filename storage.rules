@@ -4,8 +4,8 @@ service firebase.storage {
 
     // ⚠️ Cambia por tu correo de administrador (el mismo que en config.js)
     function isAdmin() {
-      return request.auth != null
-        && request.auth.token.email in ['kirvytuby@gmail.com'];
+      return request.auth != null && (request.auth.token.email in ['kirvytuby@gmail.com']
+        || firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email)));
     }
     function isEmpresa(id) {
       return request.auth != null
