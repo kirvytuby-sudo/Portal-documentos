@@ -9,7 +9,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="google" content="notranslate">
-<link rel="stylesheet" href="estilos.css">
+<link rel="stylesheet" href="estilos.css?v=5">
 </head>
 <body>
 <main class="wrap wide">
@@ -49,7 +49,7 @@
       <!-- Vista 1: todas las empresas -->
       <div id="vEmpresasB">
         <input id="bBuscarEmp" placeholder="Buscar empresa por nombre o RFC" style="margin-bottom:12px">
-        <div id="gridEmp" class="grid-emp"><p class="muted small">Cargando…</p></div>
+        <div id="gridEmp" class="lista"><p class="muted small">Cargando…</p></div>
       </div>
       <!-- Vista 2: documentos de una empresa -->
       <div id="vDetalle" class="hidden">
@@ -215,16 +215,17 @@ function renderGrid() {
   const lista = [...empresas.values()]
     .filter(e => !txt || (e.nombre + " " + (e.rfc || "")).toLowerCase().includes(txt))
     .sort((x, y) => ((st[y.id]?.pend || 0) > 0) - ((st[x.id]?.pend || 0) > 0) || x.nombre.localeCompare(y.nombre, "es"));
-  if (!lista.length) { $("gridEmp").innerHTML = `<div class="card muted" style="text-align:center;grid-column:1/-1">${empresas.size ? "Ninguna empresa coincide." : "Aún no tienes empresas. Agrégalas en la pestaña Empresas."}</div>`; return; }
+  if (!lista.length) { $("gridEmp").innerHTML = `<div class="card muted" style="text-align:center;">${empresas.size ? "Ninguna empresa coincide." : "Aún no tienes empresas. Agrégalas en la pestaña Empresas."}</div>`; return; }
   $("gridEmp").innerHTML = lista.map(e => {
     const s = st[e.id] || { tot: 0, pend: 0, ult: null };
-    return `<button class="emp-card ${s.pend ? "con-pend" : ""}" data-ver="${esc(e.id)}">
-      <div class="row between" style="flex-wrap:nowrap;align-items:flex-start">
-        <div class="info" style="min-width:0"><div class="nm">${esc(e.nombre)}</div><div class="muted small">${esc(e.rfc || "Sin RFC")}</div></div>
-        ${s.pend ? `<span class="tag warn">${s.pend} pendiente${s.pend > 1 ? "s" : ""}</span>` : s.tot ? '<span class="tag ok">Al día</span>' : ""}
+    return `<div class="item emp-row ${s.pend ? "nuevo" : ""}" data-ver="${esc(e.id)}">
+      <div class="info">
+        <div class="nm">${esc(e.nombre)} ${e.activo ? "" : '<span class="tag off">Inactiva</span>'}</div>
+        <div class="muted small">${esc(e.rfc || "Sin RFC")} · ${s.tot} documento${s.tot === 1 ? "" : "s"}${s.ult ? " · último: " + fmt(s.ult) : ""}</div>
       </div>
-      <div class="muted small">${s.tot ? `${s.tot} documento${s.tot > 1 ? "s" : ""} · último: ${fmt(s.ult)}` : "Sin envíos todavía"}${e.activo ? "" : ' · <span class="tag off">Inactiva</span>'}</div>
-    </button>`;
+      ${s.pend ? `<span class="tag warn">${s.pend} pendiente${s.pend > 1 ? "s" : ""}</span>` : s.tot ? '<span class="tag ok">Al día</span>' : '<span class="tag gris">Sin envíos</span>'}
+      <div class="acciones"><button class="btn sm">Ver documentos ›</button></div>
+    </div>`;
   }).join("");
 }
 
