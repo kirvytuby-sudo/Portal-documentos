@@ -76,6 +76,7 @@
           <div class="info"><h2 id="detNombre"></h2><p class="muted small" id="detInfo"></p></div>
         </div>
         <div id="detChecklist" class="card ck-card hidden"></div>
+        <div id="detAviso" class="aviso hidden"></div>
         <div class="filtros det">
           <input type="hidden" id="fEmpresa" value="">
           <select id="fPeriodo"></select>
@@ -181,6 +182,22 @@
       </div>
     </div>
     <div class="visor-cuerpo" id="vCuerpo"></div>
+  </div>
+</div>
+
+<!-- Asignar periodo / tipo -->
+<div id="modalClas" class="visor hidden">
+  <div class="visor-caja chica">
+    <h3 style="margin-bottom:4px">Periodo y tipo</h3>
+    <p class="muted small" id="clNombre"></p>
+    <div class="sel-doble">
+      <label><span class="lbl">Periodo</span><select id="clPer"></select></label>
+      <label><span class="lbl">¿Qué documento es?</span><select id="clTipo"></select></label>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn" id="clCancelar">Cancelar</button>
+      <button class="btn primary" id="clGuardar">Guardar</button>
+    </div>
   </div>
 </div>
 
@@ -563,13 +580,20 @@ function renderDetalle(emp) {
     $("detChecklist").classList.remove("hidden");
   } else $("detChecklist").classList.add("hidden");
   vistos = base.filter(a =>
-    (!per || a.periodo === per) &&
+    (!per || a.periodo === per) && (!sinPeriodo || per || !a.periodo) &&
     (!$("fTipo").value || ($("fTipo").value === "__sin" ? !a.categoria : a.categoria === $("fTipo").value)) &&
     (!est || (est === "pend" ? !a.revisado : a.revisado)) &&
     (!txt || (a.nombre + " " + (a.nota || "")).toLowerCase().includes(txt)));
   porRuta = new Map(vistos.map(a => [a.path, a]));
   $("bRevTodo").disabled = !vistos.some(a => !a.revisado);
   $("bZip").disabled = !vistos.length;
+  // Avisar si hay documentos en otros periodos o sin periodo
+  const sinPer = base.filter(a => !a.periodo).length, otros = per ? base.filter(a => a.periodo && a.periodo !== per).length : 0;
+  if (per && (sinPer || otros)) {
+    $("detAviso").innerHTML = `${sinPer ? `<b>${sinPer}</b> documento${sinPer > 1 ? "s" : ""} sin periodo asignado` : ""}${sinPer && otros ? " y " : ""}${otros ? `<b>${otros}</b> en otros periodos` : ""}.
+      <button class="btn sm" id="bVerTodos">Ver todos</button>${sinPer ? ' <button class="btn sm" id="bVerSin">Ver los que no tienen periodo</button>' : ""}`;
+    $("detAviso").classList.remove("hidden");
+  } else $("detAviso").classList.add("hidden");
   $("listaArch").innerHTML = vistos.length ? vistos.map(filaArchivo).join("")
     : `<div class="card muted" style="text-align:center">${est === "pend" ? "🎉 No hay documentos pendientes." : per ? "Sin documentos en " + etiquetaPeriodo(per) + "." : "Sin documentos."}</div>`;
   if (!$("visor").classList.contains("hidden")) {
@@ -578,6 +602,12 @@ function renderDetalle(emp) {
     else if (vistos.length) visorAbrir(Math.min(vIdx, vistos.length - 1)); else visorCerrar();
   }
 }
+$("detAviso").onclick = e => {
+  if (e.target.id === "bVerTodos") { $("fPeriodo").value = ""; $("fTipo").value = ""; renderArchivos(); }
+  if (e.target.id === "bVerSin") { $("fPeriodo").value = ""; sinPeriodo = true; renderArchivos(); }
+};
+let sinPeriodo = false;
+$("fPeriodo").addEventListener("change", () => { sinPeriodo = false; });
 $("detChecklist").onclick = e => {
   const t = e.target.closest("[data-tipo]"); if (t) { $("fTipo").value = $("fTipo").value === t.dataset.tipo ? "" : t.dataset.tipo; return renderArchivos(); }
   const c = e.target.closest("[data-ck]"); if (c) abrirCk(c.dataset.ck);
@@ -691,6 +721,7 @@ function filaArchivo(a) {
     <span class="tag ${a.revisado ? "ok" : "warn"}">${a.revisado ? "Revisado" : "Pendiente"}</span>
     <div class="acciones">
       <button class="btn sm" data-act="ver" data-p="${esc(a.path)}">👁 Ver</button>
+      <button class="btn sm" data-act="clas" data-p="${esc(a.path)}" title="Cambiar periodo o tipo">✏️ Periodo/tipo</button>
       <button class="btn sm" data-act="rev" data-p="${esc(a.path)}">${a.revisado ? "Desmarcar" : "✓ Revisado"}</button>
       <button class="btn sm danger" data-act="del" data-p="${esc(a.path)}">Eliminar</button>
     </div></div>`;
@@ -708,6 +739,7 @@ $("listaArch").onclick = async e => {
   const a = porRuta.get(b.dataset.p); if (!a) return;
   if (b.dataset.act === "rev") await updateDoc(doc(db, a.path), { revisado: !a.revisado });
   if (b.dataset.act === "ver") visorAbrir(vistos.indexOf(a));
+  if (b.dataset.act === "clas") abrirClas([a]);
   if (b.dataset.act === "del") {
     if (!confirm(`¿Eliminar definitivamente "${a.nombre}"? No se puede deshacer.`)) return;
     try {
@@ -889,6 +921,25 @@ function avisarNuevos(snap) {
       .catch(() => { try { new Notification("Documento nuevo", op); } catch {} });
   }
 }
+
+// ---------- Asignar periodo / tipo ----------
+let clDocs = [];
+function abrirClas(docs) {
+  clDocs = docs; const a = docs[0], e = empresas.get(a.empresaId);
+  $("clNombre").textContent = docs.length === 1 ? a.nombre : `${docs.length} documentos`;
+  $("clPer").innerHTML = opcionesPeriodoHTML(a.periodo || $("fPeriodo").value || $("bPeriodo").value);
+  const tipos = opcionesTipo(ckDe(e));
+  $("clTipo").innerHTML = tipos.map(t => `<option ${t === a.categoria ? "selected" : ""}>${esc(t)}</option>`).join("");
+  $("modalClas").classList.remove("hidden");
+}
+$("clCancelar").onclick = () => $("modalClas").classList.add("hidden");
+$("modalClas").onclick = e => { if (e.target === $("modalClas")) $("modalClas").classList.add("hidden"); };
+$("clGuardar").onclick = async () => {
+  const wb = writeBatch(db);
+  clDocs.forEach(a => wb.update(doc(db, a.path), { periodo: $("clPer").value, categoria: $("clTipo").value }));
+  await wb.commit(); $("modalClas").classList.add("hidden");
+  toast(`✓ Asignado a ${etiquetaPeriodo($("clPer").value)} · ${$("clTipo").value}`);
+};
 
 // ---------- Checklist: configuración ----------
 let ckEmp = null;
