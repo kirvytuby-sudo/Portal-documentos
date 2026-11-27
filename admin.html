@@ -24,6 +24,7 @@
     <div class="row">
       <button class="btn ghost sm hidden" id="bInstalar">📲 Instalar app</button>
       <div class="row hidden" id="sesion">
+        <button class="btn ghost sm" id="bMiTg" title="Recibir avisos en mi Telegram">✈️ Mi Telegram</button>
         <button class="btn ghost sm" id="bNotif" title="Avisos de documentos nuevos">🔕 Avisos</button>
         <span class="muted small" id="yo"></span><button class="btn ghost sm" id="bSalir">Salir</button>
       </div>
@@ -187,6 +188,9 @@
           <button class="btn" id="bAvProbar">Enviar aviso de prueba</button>
         </div>
         <p id="avMsg" class="msg"></p>
+        <h3 style="margin:16px 0 8px">Usuarios que reciben avisos en su Telegram</h3>
+        <p class="muted small" style="margin-bottom:8px">Cada usuario los activa desde el botón <b>✈️ Mi Telegram</b> de su panel.</p>
+        <div id="tgLista" class="lista"></div>
       </details>
       <div class="card">
         <h3>Agregar usuario</h3>
@@ -223,6 +227,15 @@
   </div>
 </div>
 
+<!-- Mi Telegram -->
+<div id="modalTg" class="visor hidden">
+  <div class="visor-caja chica">
+    <h3 style="margin-bottom:6px">✈️ Avisos en mi Telegram</h3>
+    <div id="tgCuerpo"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn" id="tgCerrar">Cerrar</button></div>
+  </div>
+</div>
+
 <!-- Asignar periodo / tipo -->
 <div id="modalClas" class="visor hidden">
   <div class="visor-caja chica">
@@ -256,13 +269,13 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, updatePassword, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, onSnapshot, query, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getStorage, ref, deleteObject, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { firebaseConfig, ADMIN_EMAILS, DOMINIO_EMPRESAS, NOMBRE_DESPACHO, ALMACENAMIENTO, MAX_MB } from "./config.js";
 import { iniciarActividad, cerrarActividad } from "./actividad.js";
 import { etiquetaPeriodo, periodoAnterior, checklistDe, opcionesTipo, estadoChecklist, opcionesPeriodoHTML, esOtros } from "./comun.js";
 import { iniciarPWA } from "./pwa.js";
-import { leerAvisos, enviarAvisos, detectarChatTelegram } from "./avisos.js";
+import { leerAvisos, enviarAvisos, detectarChatTelegram, telegramEnviar, telegramBotUsuario, telegramEsperarCodigo } from "./avisos.js";
 iniciarPWA(document.getElementById("bInstalar"));
 
 const app = initializeApp(firebaseConfig);
@@ -384,6 +397,7 @@ const irBandeja = empId => { $("fEstado").value = ""; verEmpresa(empId); documen
 // ---------- Configuración de avisos (solo el dueño) ----------
 async function cargarCfgAvisos() {
   const c = await leerAvisos(db), em = c.email || {}, wa = c.whatsapp || {};
+  pintarTgLista(c.telegram?.chats || {});
   $("emActivo").checked = !!em.activo; $("emPara").value = em.para || ""; $("emService").value = em.serviceId || "";
   $("emTemplate").value = em.templateId || ""; $("emKey").value = em.publicKey || "";
   $("waActivo").checked = !!wa.activo; $("waTel").value = wa.telefono || ""; $("waKey").value = wa.apikey || "";
@@ -408,7 +422,7 @@ $("bAvGuardar").onclick = async () => {
   if (c.email.activo && !(c.email.para && c.email.serviceId && c.email.templateId && c.email.publicKey)) return msg("avMsg", "Para el correo llena los 4 campos.", "err");
   if (c.whatsapp.activo && !(c.whatsapp.telefono && c.whatsapp.apikey)) return msg("avMsg", "Para WhatsApp pon tu número y tu API key.", "err");
   if (c.telegram.activo && !(c.telegram.token && c.telegram.chatId)) return msg("avMsg", "Para Telegram pon el token y pulsa Detectar mi chat.", "err");
-  try { await setDoc(doc(db, "ajustes", "avisos"), c); msg("avMsg", "✓ Avisos guardados.", "ok"); }
+  try { await setDoc(doc(db, "ajustes", "avisos"), c, { merge: true }); msg("avMsg", "✓ Avisos guardados.", "ok"); }
   catch (e) { console.error(e); msg("avMsg", "No se pudo guardar: " + (e.code || e.message), "err"); }
 };
 $("bAvProbar").onclick = async () => {
@@ -421,6 +435,66 @@ $("bAvProbar").onclick = async () => {
   msg("avMsg", err.length ? "Falló: " + err.map(x => x.reason?.message || x.reason).join(", ") + ". Revisa los datos."
     : "✓ Prueba enviada. Revisa Telegram, tu correo o WhatsApp.", err.length ? "err" : "ok");
 };
+
+// ---------- Mi Telegram: cada usuario vincula el suyo ----------
+const claveUsu = () => (auth.currentUser?.email || "").toLowerCase().replace(/[^a-z0-9]/g, "_");
+function pintarTgLista(chats) {
+  const l = Object.entries(chats);
+  $("tgLista").innerHTML = l.length ? l.map(([k, c]) => `<div class="item">
+      <span class="punto ${c.activo ? "" : "off"}"></span>
+      <div class="info"><div class="nm">${esc(c.nombre || k)}</div><div class="muted small">Telegram: ${esc(c.tgNombre || c.chatId)} · ${c.activo ? "recibe avisos" : "pausado"}</div></div>
+      <button class="btn sm danger" data-tgquitar="${esc(k)}">Quitar</button></div>`).join("")
+    : '<p class="muted small">Nadie ha vinculado su Telegram todavía.</p>';
+}
+$("tgLista").onclick = async e => {
+  const k = e.target.dataset.tgquitar; if (!k || !confirm("¿Dejar de enviar avisos a este usuario?")) return;
+  await updateDoc(doc(db, "ajustes", "avisos"), { [`telegram.chats.${k}`]: deleteField() });
+  cargarCfgAvisos(); toast("Quitado");
+};
+let tgEspera = false;
+async function pintarMiTg() {
+  const cfg = await leerAvisos(db), tg = cfg.telegram || {}, mio = tg.chats?.[claveUsu()];
+  const cuerpo = $("tgCuerpo");
+  if (!tg.token) { cuerpo.innerHTML = '<p class="muted">El dueño aún no configura el bot de Telegram. Pídele que lo active en <b>Usuarios → Avisos</b>.</p>'; return; }
+  if (mio) {
+    cuerpo.innerHTML = `<p>Tu Telegram <b>${esc(mio.tgNombre || "")}</b> está vinculado y <b>${mio.activo ? "recibe avisos" : "está pausado"}</b>.</p>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="tgPausar">${mio.activo ? "Pausar avisos" : "Reanudar avisos"}</button>
+        <button class="btn" id="tgProbar">Enviarme una prueba</button>
+        <button class="btn danger" id="tgDesvincular">Desvincular</button>
+      </div><p id="tgMsg" class="msg"></p>`;
+    $("tgPausar").onclick = async () => { await updateDoc(doc(db, "ajustes", "avisos"), { [`telegram.chats.${claveUsu()}.activo`]: !mio.activo }); pintarMiTg(); };
+    $("tgDesvincular").onclick = async () => { await updateDoc(doc(db, "ajustes", "avisos"), { [`telegram.chats.${claveUsu()}`]: deleteField() }); pintarMiTg(); };
+    $("tgProbar").onclick = async () => {
+      try { await telegramEnviar(tg.token, mio.chatId, "✅ Prueba: así te llegarán los avisos cuando un cliente suba documentos."); msg("tgMsg", "✓ Enviado. Revisa tu Telegram.", "ok"); }
+      catch (e) { msg("tgMsg", e.message, "err"); }
+    };
+    return;
+  }
+  cuerpo.innerHTML = `<p>Recibe un mensaje en tu Telegram cada vez que un cliente suba documentos.</p>
+    <ol class="small tg-pasos"><li>Pulsa <b>Vincular mi Telegram</b>: se abre el bot de avisos.</li><li>En Telegram toca <b>Iniciar</b> (o <b>Start</b>).</li><li>Regresa aquí: se vincula solo.</li></ol>
+    <button class="btn primary" id="tgVincular">Vincular mi Telegram</button><p id="tgMsg" class="msg"></p>`;
+  $("tgVincular").onclick = async () => {
+    const w = window.open("", "_blank"); // se abre ya, para que el navegador no la bloquee
+    try {
+      const bot = await telegramBotUsuario(tg.token);
+      const codigo = Array.from(crypto.getRandomValues(new Uint8Array(6)), x => "abcdefghjkmnpqrstuvwxyz23456789"[x % 31]).join("");
+      const url = `https://t.me/${bot}?start=${codigo}`;
+      if (w) w.location.href = url; else location.href = url;
+      msg("tgMsg", "Esperando a que toques Iniciar en Telegram…");
+      tgEspera = true;
+      const chat = await telegramEsperarCodigo(tg.token, codigo, () => !tgEspera);
+      if (!chat) return msg("tgMsg", "No se detectó. Vuelve a pulsar Vincular y toca Iniciar en Telegram.", "err");
+      const yo = auth.currentUser.email.toLowerCase();
+      const nombre = duenos.includes(yo) ? yo : (usuarios.find(u => u.id === yo)?.nombre || nombreUsuario(yo));
+      await setDoc(doc(db, "ajustes", "avisos"), { telegram: { chats: { [claveUsu()]: { chatId: chat.id, tgNombre: chat.nombre, nombre, activo: true } } } }, { merge: true });
+      await telegramEnviar(tg.token, chat.id, `✅ Listo, ${nombre}. Aquí te avisaremos cuando un cliente suba documentos.`).catch(() => {});
+      pintarMiTg(); if (esDueno) cargarCfgAvisos();
+    } catch (e) { console.error(e); w?.close(); msg("tgMsg", "No se pudo vincular: " + e.message, "err"); }
+  };
+}
+$("bMiTg").onclick = () => { $("modalTg").classList.remove("hidden"); $("tgCuerpo").innerHTML = '<p class="muted">Cargando…</p>'; pintarMiTg(); };
+$("tgCerrar").onclick = () => { tgEspera = false; $("modalTg").classList.add("hidden"); };
 
 // ---------- Usuarios (solo el dueño) ----------
 let usuarios = [], passUsu = new Map(), passVisible = new Set();
